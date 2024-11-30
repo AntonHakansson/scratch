@@ -1,7 +1,7 @@
 /*
- * A linear allocator works well until we need resource cleanup (file handles, sockets, etc.)
- * C++ follows RAII paradigm and cleans up resources with a destructor when the resource gets out of scope.
- * So what if we implement a similar scope for the Arena?
+ * A linear allocator works well until we need to cleanup resources (file handles, sockets, etc.).
+ * C++  nfollows RAII paradigm and cleans up resources with a destructor when the resource is out of scope.
+ * So what if we implement a similar destructor scope for the Arena?
  *
  * Idea taken from [[https://www.slideshare.net/DICEStudio/scope-stack-allocation][Scope Stack Allocator]].
  * Presentation from DICE Coder's Day (2010 November) by Andreas Fredriksson.
@@ -64,7 +64,6 @@ void arena_rewind(Arena *a, size point)
 }
 
 // Next, we introduce the concept of a scope and keep track of a list of resources to cleanup.
-// I typically implement a scope anyway to "free" temporary memory that I allocate in a scope.
 
 typedef void (*Resource_Callback)(void*);
 

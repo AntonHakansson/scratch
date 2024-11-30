@@ -90,26 +90,26 @@ int os_write_str(int fd, Str s)
 ////////////////////////////////////////////////////////////////////////////////
 //- Error free API
 //
-// Arena friendly error API that supports dynamic error messages, try/catch similar
-// semantics.  The API allows users to start a new scope(similar to try/catch blocks
-// except we have a known control flow) to accumulate errors that gets consolidated
+// Arena friendly error API that supports dynamic error messages and semantics similar to
+// try/catch but without the control flow headache.
+// The API allows users to start a new scope to accumulate errors that gets consolidated
 // later. This can simplify and collapse almost all error checking code paths. However,
 // the called procedure needs to accommodate this design choice by first handling invalid
 // input gracefully, and second, emit errors through the API.
 //
 // Compare (traditional)
 //
-// Window  *window = open_window();
+// Window  *window = open_window(...);
 // if (!window) { ERROR }
-// Open_GL *gl = init_opengl(window);
+// Open_GL *gl = init_opengl(window, ...);
 // if (!gl) { ERROR }
 //
 // with (Error-free API)
 //
 // Error_Scope err_scope = err_start("FATAL");
 // {
-//   Window  *window = open_window();
-//   Open_GL *gl     = init_opengl(window);
+//   Window  *window = open_window(..., &err_scope);
+//   Open_GL *gl     = init_opengl(window, ..., &err_scope);
 // }
 // Error_Node *e = err_end(err_scope);
 // for (; e; e = e->next) { ERROR e->text }
@@ -235,7 +235,7 @@ b32 os_write(i32 fd, u8 *buf, size len)
   return 1;
 }
 
-void os_exit (int status)
+void os_exit(int status)
 {
   exit(status);
 }

@@ -21,7 +21,6 @@ typedef __SIZE_TYPE__    usize;
 #define alignof(s) (size)_Alignof(s)
 #define countof(s) (sizeof(s) / sizeof(*(s)))
 #define assert(c)  while((!(c))) __builtin_unreachable()
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Agnostic Layer
@@ -31,7 +30,6 @@ typedef __SIZE_TYPE__    usize;
 b32  os_write(i32 fd, u8 *buf, size len);
 b32  os_read (i32 fd, u8 *buf, size len);
 void os_exit (int status);
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 // Arena Allocator
@@ -42,7 +40,6 @@ void os_exit (int status);
 #define new3(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
 
 typedef struct {
-  // REVIEW: We only need an *at, *end pointer
   u8 *backing;
   u8 *at;
   size capacity;
@@ -76,11 +73,10 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 
   return p;
 }
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Buffered IO
-////////////////////////////////////////////////////////////////////////////////
+
 typedef struct  {
   u8 *buf;
   i32 capacity;
@@ -161,11 +157,10 @@ void flush(Write_Buffer *b) {
     b->len = 0;
   }
 }
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 //// String slice
-////////////////////////////////////////////////////////////////////////////////
+
 #define S(s)        (Str){ .buf = (u8 *)(s), .len = countof((s)) - 1, }
 #define S_PRINT(s)  (int)s.len, s.buf
 #define S_FMT       "%.*s"
@@ -180,32 +175,12 @@ void append_str(Write_Buffer *b, Str s)
 {
   append(b, s.buf, s.len);
 }
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Rectcut UI layout
-////////////////////////////////////////////////////////////////////////////////
+
 #define height 400
 #define width  400
-
-void append_svg_attr_str(Write_Buffer *b, Str name, Str val)
-{
-  append_str(b, name);
-  append_str(b, S("=\""));
-  append_str(b, val);
-  append_str(b, S("\""));
-}
-
-void append_svg_attr_ints(Write_Buffer *b, Str name, i32 *xs, size count)
-{
-  append_str(b, name);
-  append_str(b, S("=\""));
-  for (size i = 0; i < count; i++) {
-    if (i > 0) append_byte(b, ' ');
-    append_long(b, xs[i]);
-  }
-  append_str(b, S("\" "));
-}
 
 typedef struct {
   i32 x, y, w, h;
@@ -252,6 +227,28 @@ Rectangle rectcut_right(Rectangle *r, i32 amount)
   return result;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//// SVG output
+
+void append_svg_attr_str(Write_Buffer *b, Str name, Str val)
+{
+  append_str(b, name);
+  append_str(b, S("=\""));
+  append_str(b, val);
+  append_str(b, S("\""));
+}
+
+void append_svg_attr_ints(Write_Buffer *b, Str name, i32 *xs, size count)
+{
+  append_str(b, name);
+  append_str(b, S("=\""));
+  for (size i = 0; i < count; i++) {
+    if (i > 0) append_byte(b, ' ');
+    append_long(b, xs[i]);
+  }
+  append_str(b, S("\" "));
+}
+
 void append_svg_rectcut(Write_Buffer *b, Rectangle r, Str color, Str name)
 {
   append_lit(b, "<rect style=\"fill:none;stroke:");
@@ -282,34 +279,32 @@ int run(Arena *heap)
 
   i32 view_box[4] = {0, 0, width, height};
   append_lit(stdout, "<svg xmlns=\"http://www.w3.org/2000/svg\" ");
-  append_svg_attr_ints(stdout, S("viewBox"), view_box, countof(view_box));
+    append_svg_attr_ints(stdout, S("viewBox"), view_box, countof(view_box));
   append_lit(stdout, ">\n");
   {
     Rectangle rect = (Rectangle){ 0, 0, width, height };
     append_svg_rectcut(stdout, rect, S("#000000"), S(""));
 
-    Rectangle top_panel = rectcut_top(&rect, 30);
-    Rectangle file  = rectcut_left(&top_panel, 50);
-    Rectangle edit  = rectcut_left(&top_panel, 50);
-    Rectangle close = rectcut_right(&top_panel, 50);
+    Rectangle rtop_panel = rectcut_top(&rect, 30);
+    Rectangle rfile  = rectcut_left(&rtop_panel, 50);
+    Rectangle redit  = rectcut_left(&rtop_panel, 50);
+    Rectangle rclose = rectcut_right(&rtop_panel, 50);
 
-    append_svg_rectcut(stdout, top_panel, S("#DDDDDD"), S("top panel"));
+    append_svg_rectcut(stdout, rtop_panel, S("#DDDDDD"), S("top panel"));
     append_svg_rectcut(stdout, rect,      S("#DDDDDD"), S("body"));
 
-    append_svg_rectcut(stdout, file,  null_str, S("file"));
-    append_svg_rectcut(stdout, edit,  null_str, S("edit"));
-    append_svg_rectcut(stdout, close, null_str, S("close"));
+    append_svg_rectcut(stdout, rfile,  null_str, S("file"));
+    append_svg_rectcut(stdout, redit,  null_str, S("edit"));
+    append_svg_rectcut(stdout, rclose, null_str, S("close"));
   }
   append_lit(stdout, "</svg>\n");
 
   flush(stdout);
   return 0;
 }
-////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 //// SYSCALL
-////////////////////////////////////////////////////////////////////////////////
 b32 os_write(i32 fd, u8 *buf, size len)
 {
   for (size off = 0; off < len;) {
@@ -357,4 +352,3 @@ void _start(void)
   Arena heap = arena_init(memory, HEAP_CAPACITY);
   os_exit(run(&heap));
 }
-////////////////////////////////////////////////////////////////////////////////

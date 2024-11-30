@@ -1,0 +1,5 @@
+#+title: Minimal Vulkan Compute Shader
+
+* Resources
+
+- https://gpuopen.com/learn/mesh_shaders/mesh_shaders-font_and_vector_art_rendering_with_mesh_shaders/

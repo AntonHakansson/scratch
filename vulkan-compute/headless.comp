@@ -1,0 +1,88 @@
+#version 450
+
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0) buffer Buffer{
+  uint values[];
+};
+layout(rgba8, binding = 1) uniform restrict writeonly image2D u_output_image;
+
+layout(push_constant) uniform constants {
+    uint buffer_elements;
+    uint _dummy;
+};
+
+float rect_sdf(vec2 position, vec2 half_size, float corner_radius)
+{
+   position = abs(position) - half_size + corner_radius;
+   return length(max(position, 0.0)) + min(max(position.x, position.y), 0.0) - corner_radius;
+}
+
+float circle_sdf(vec2 position, float radius)
+{
+  return length(position) - radius;
+}
+
+void main() 
+{
+  ivec2 image_isize = imageSize(u_output_image);
+  vec3 bg_color = vec3(0.97, 0.96, 0.95);
+  vec3 rect_color = vec3(1.0, 0.0, 0.0);
+  
+	ivec2 index = ivec2(gl_GlobalInvocationID.xy);
+	if (index.x >= image_isize.x || index.y >= image_isize.y) return;
+
+  vec2 pos = vec2(index);
+
+  vec3 col = bg_color;
+
+  int i = 0;
+  uint cmd_count = values[i++];
+  for (int cmd = 0; cmd < cmd_count; cmd++) {
+    uint cmd_type = values[i++];
+    if (cmd_type == 1) {
+      vec2 rect_pos = vec2(values[i++], values[i++]);
+      vec2 rect_hsize = vec2(values[i++], values[i++]) * 0.5;
+      float radius = values[i++];
+      float d = rect_sdf(pos - rect_pos - rect_hsize, rect_hsize, radius);
+      // float a = d <= 0.0 ? 1.0 : 0.0;
+      float a = 1 - smoothstep(-0.99, 0.01, d);
+      col = mix(col, rect_color, a);
+    }
+    else if (cmd_type == 2) {
+      vec2 circle_pos = vec2(values[i++], values[i++]);
+      float circle_radius = values[i++] * 0.5;
+      float d = circle_sdf(pos - circle_pos - vec2(circle_radius), circle_radius);
+      // float a = d <= 0.0 ? 1.0 : 0.0;
+      float a = 1 - smoothstep(-0.99, 0.0, d);
+      col = mix(col, rect_color, a);
+    }
+    else if (cmd_type == 3) {
+      float stroke_radius = values[i++] * 0.5;
+      uint point_count = values[i++];
+
+      vec2 point_a = vec2(values[i++], values[i++]);
+      for (int point_i = 0; point_i < point_count - 1; point_i++) {
+        vec2 point_b = vec2(values[i++], values[i++]);
+
+        float d = 0;
+        {
+          vec2 ba = point_b - point_a;
+          vec2 pa = pos - point_a;
+          float t = clamp(dot(pa, ba) / dot(ba, ba), 0, 1);
+          d = length(pa - ba * t) - stroke_radius;
+        }
+        float a = 1 - smoothstep(-0.99, 0.0, d);
+        // a = (d <= 0) ? 1.0 : 0.0;
+        col = mix(col, rect_color, a);
+        point_a = point_b;
+      }
+    }
+  }
+
+  imageStore(u_output_image, index, vec4(col, 1.0));
+}
+
+/* Local Variables: */
+/* compile-command: "glslc headless.comp -O0 -g --target-env=vulkan1.3 -o headless.comp.spv" */
+/* End: */
