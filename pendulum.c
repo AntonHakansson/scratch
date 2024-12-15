@@ -199,6 +199,9 @@ typedef struct {
   Arena *perm;
   Arena *frame;
 
+  Camera2D camera;
+  double time_accumulator;
+  
   Pendulum *pendulum_array;
   Size pendulum_max_count;
   Size pendulum_count;
@@ -274,10 +277,6 @@ void draw_spring_v(Vector2 start, Vector2 end, Color color) {
   float distance =
     Vector2Length(Vector2Subtract(end, start));
 
-  // DrawCircleSectorLines(Vector2 center, float radius, float startAngle, float
-  // endAngle, int segments, Color color); // Draw circle sector outline
-  // DrawCircleSectorLines();
-
   float spring_len = distance * 0.5f;
   float t_start = 15.f;
   float t_end = t_start + spring_len;
@@ -285,16 +284,15 @@ void draw_spring_v(Vector2 start, Vector2 end, Color color) {
   Size count = 6;
   float t_step = spring_len / (count);
 
-  Vector2 spring_start = Vector2Add(start, Vector2Scale(dir, t_start));
-  Vector2 spring_end = Vector2Add(spring_start, Vector2Scale(dir, t_step * (count)));
+  Vector2 spring_start = Vector2Add(start,        Vector2Scale(dir, t_start));
+  Vector2 spring_end   = Vector2Add(spring_start, Vector2Scale(dir, t_step * (count)));
 
   Vector2 pos = spring_start;
   for (Size step = 0; step < count; step++) {
-    /* DrawCircleV(pos, 2.f, RED); */
     Vector2 tangent = (Vector2){ dir.y, -dir.x };
     Vector2 next_pos = Vector2Add(pos, Vector2Scale(dir, t_step));
     Vector2 c1 = Vector2Add(Vector2Scale(tangent, dim * 2), Vector2Lerp(pos, next_pos, 0.5f));
-    Vector2 c2 = Vector2Add(Vector2Scale(tangent, dim), Vector2Lerp(pos, next_pos, 0.6f));
+    Vector2 c2 = Vector2Add(Vector2Scale(tangent, dim * 1), Vector2Lerp(pos, next_pos, 0.6f));
     DrawSplineSegmentBezierCubic(pos, c1, c2, next_pos, 1.f, color);
     pos = next_pos;
   }
@@ -330,13 +328,8 @@ void *update(App_Update_Params params, void *pstate) {
   }
   assert(p);
 
-  BeginDrawing();
-  ClearBackground(BLACK);
-
-  Camera2D camera = { .zoom = 1, };
-  camera.offset = (Vector2) { GetRenderWidth() / 2.f, GetRenderHeight() / 2.f };
-  BeginMode2D(camera);
-
+  p->time_accumulator += GetFrameTime();
+  
   if (IsKeyPressed(KEY_W)) {
     p->pendulum_count++;
   }
@@ -345,45 +338,108 @@ void *update(App_Update_Params params, void *pstate) {
   }
   p->pendulum_count = clamp(p->pendulum_count, 0, p->pendulum_max_count);
 
+  Pendulum dummy_pendulum = {0};
+  Pendulum *mouse_force = &dummy_pendulum;
+  Vector2 mouse_pos = GetScreenToWorld2D(GetMousePosition(), p->camera);
   for (Size i = 0; i < p->pendulum_count; i++) {
     Pendulum *pendulum = &p->pendulum_array[i];
-    if (i > 0) { pendulum->fixture = p->pendulum_array[i - 1].pos; }
-
     if (IsKeyPressed(KEY_SPACE)) {
       __builtin_memset(pendulum, 0, sizeof *pendulum);
     }
     if (pendulum->mass == 0) {
       pendulum->mass = 64.f;
-      pendulum->length = 150;
-      float theta = randomf() * 2 * 3.14;
+      pendulum->length = 64.f;
+      float theta = randomf() * 2.0f * 3.14f;
       pendulum->pos = Vector2Scale( Vector2Rotate((Vector2){ 1.f, 0.f }, theta), pendulum->length);
     }
-    float dt = GetFrameTime();
 
-    draw_spring_v(pendulum->fixture, pendulum->pos, WHITE);
+    if (IsMouseButtonDown(0)) {
+      {
+        Vector2 dir = Vector2Normalize(Vector2Subtract(pendulum->pos, mouse_pos));
+        float distance = Vector2Distance(pendulum->pos, mouse_pos);
+        Vector2 F = Vector2Scale(dir, 512.f * 1.f/(distance * distance));
+        pendulum->vel = Vector2Add(pendulum->vel, F);
+      }
+    }
+  }
+  
+  float dt = 1.f / 256.f;
+  while (p->time_accumulator >= dt) {
+    p->time_accumulator -= dt;
+
+    for (Size i = p->pendulum_count - 1; i >= 0; i--) {
+      Pendulum *pendulum = &p->pendulum_array[i];
+      Pendulum *parent = &dummy_pendulum;
+      if (i > 0) { parent = &p->pendulum_array[i - 1]; }
+      pendulum->fixture = parent->pos;
+
+      float stiffness = 1.0f * 86.f;
+      float damping = 0.998f;
+      float fg = pendulum->mass * 10.f;
+
+      Vector2 calc_force(Vector2 vel, Vector2 pos, Vector2 fixture) {
+        Vector2 dir = Vector2Normalize(Vector2Subtract(pos, pendulum->fixture));
+        float elongation =
+          pendulum->length -
+          Vector2Length(Vector2Subtract(pendulum->fixture, pos));
+        Vector2 force_radial = Vector2Scale(dir, stiffness * elongation);
+        Vector2 force_gravity = {0, fg};
+        return Vector2Add(force_gravity, force_radial);
+      }
+
+      // Runga-kutta 4 approximation
+      Vector2 force[4] = {0};
+      float dts[4] = {dt * 0.5, dt * 0.5, dt * 0.5, dt};
+      { // k1
+        /* Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[0], dts[0])); */
+        /* Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[0])); */
+        force[0] = calc_force(pendulum->vel, pendulum->pos, pendulum->fixture);
+      }
+      { // k2
+        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[0], dts[1]));
+        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[1]));
+        force[1] = calc_force(vel, pos, pendulum->fixture);
+      }
+      { // k3
+        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[1], dts[2]));
+        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[2]));
+        force[2] = calc_force(vel, pos, pendulum->fixture);
+      }
+      { // k3
+        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[2], dts[3]));
+        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[3]));
+        force[3] = calc_force(vel, pos, pendulum->fixture);
+      }
+
+      Vector2 F = {0};
+      F = Vector2Add(F, Vector2Scale(force[0], 1.f));
+      F = Vector2Add(F, Vector2Scale(force[1], 2.f));
+      F = Vector2Add(F, Vector2Scale(force[2], 2.f));
+      F = Vector2Add(F, Vector2Scale(force[3], 1.f));
+      F = Vector2Scale(F, 1.f / 6.0f);
+      
+      if (parent) { parent->vel = Vector2Add(parent->vel, Vector2Scale(F, -dt)); }
+      pendulum->vel = Vector2Add(pendulum->vel, Vector2Scale(F, dt));
+      pendulum->vel = Vector2Scale(pendulum->vel, damping);
+      pendulum->pos = Vector2Add(pendulum->pos, Vector2Scale(pendulum->vel, dt));
+    }
+  }
+
+  BeginDrawing();
+  ClearBackground(BLACK);
+
+  p->camera.zoom = 1.f;
+  p->camera.offset = (Vector2) { GetRenderWidth() / 2.f, GetRenderHeight() / 2.f - 200.f };
+  BeginMode2D(p->camera);
+
+  for (Size i = p->pendulum_count - 1; i >= 0; i--) {
+    Pendulum *pendulum = &p->pendulum_array[i];
     if (i == 0) { draw_fixture(pendulum->fixture); }
+    draw_spring_v(pendulum->fixture, pendulum->pos, WHITE);
     DrawCircleV(pendulum->pos, 16.f, RED);
-
-    Vector2 dir = Vector2Normalize(Vector2Subtract(pendulum->pos, pendulum->fixture));
-    float fg = pendulum->mass * 10.f;
-    float stiffness = 1.0f * 64.f;
-    float elongation =
-        pendulum->length -
-        Vector2Length(Vector2Subtract(pendulum->fixture, pendulum->pos));
-    /* elongation = elongation > 0 ? 0 : elongation; */
-    Vector2 force_radial = Vector2Scale(dir, stiffness * elongation);
-    Vector2 force_gravity = {0, fg};
-
-    Vector2 force = Vector2Add(force_gravity, force_radial);
-    pendulum->vel = Vector2Add(pendulum->vel, Vector2Scale(force, dt));
-    pendulum->pos = Vector2Add(pendulum->pos, Vector2Scale(pendulum->vel, dt));
-
-    /* Vector2 correction = Vector2Subtract(Vector2Scale(Vector2Normalize(Vector2Subtract(pendulum->pos, pendulum->fixture)), pendulum->length), pendulum->pos); */
-    /* pendulum->pos = Vector2Add(pendulum->pos, correction); */
   }
 
   EndMode2D();
-
   EndDrawing();
 
   return p;
