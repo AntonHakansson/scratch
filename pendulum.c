@@ -387,37 +387,23 @@ void *update(App_Update_Params params, void *pstate) {
         return Vector2Add(force_gravity, force_radial);
       }
 
-      // Runga-kutta 4 approximation
-      Vector2 force[4] = {0};
-      float dts[4] = {dt * 0.5, dt * 0.5, dt * 0.5, dt};
-      { // k1
-        /* Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[0], dts[0])); */
-        /* Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[0])); */
-        force[0] = calc_force(pendulum->vel, pendulum->pos, pendulum->fixture);
-      }
-      { // k2
-        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[0], dts[1]));
-        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[1]));
-        force[1] = calc_force(vel, pos, pendulum->fixture);
-      }
-      { // k3
-        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[1], dts[2]));
-        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[2]));
-        force[2] = calc_force(vel, pos, pendulum->fixture);
-      }
-      { // k3
-        Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(force[2], dts[3]));
-        Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[3]));
-        force[3] = calc_force(vel, pos, pendulum->fixture);
-      }
+      Vector2 F = {0}; {
+        // Runga-kutta 4 approximation
+        Vector2 force[4] = {0};
+        int weights[4] = { 1, 2, 2, 1 };
+        float dts[4] = { 0.f, dt * .5f, dt * .5f, dt};
 
-      Vector2 F = {0};
-      F = Vector2Add(F, Vector2Scale(force[0], 1.f));
-      F = Vector2Add(F, Vector2Scale(force[1], 2.f));
-      F = Vector2Add(F, Vector2Scale(force[2], 2.f));
-      F = Vector2Add(F, Vector2Scale(force[3], 1.f));
-      F = Vector2Scale(F, 1.f / 6.0f);
-      
+        int sum_weights = 0;
+        Vector2 prev_force = {0};
+        for (Size k = 0; k < 4; k++) {
+          Vector2 vel = Vector2Add(pendulum->vel, Vector2Scale(prev_force, dts[k]));
+          Vector2 pos = Vector2Add(pendulum->pos, Vector2Scale(vel, dts[k]));
+          prev_force = force[k] = calc_force(vel, pos, pendulum->fixture);
+          F = Vector2Add(F, Vector2Scale(force[k], weights[k]));
+          sum_weights += weights[k];
+        }
+        F = Vector2Scale(F, 1.f / (float)sum_weights);
+      }
       if (parent) { parent->vel = Vector2Add(parent->vel, Vector2Scale(F, -dt)); }
       pendulum->vel = Vector2Add(pendulum->vel, Vector2Scale(F, dt));
       pendulum->vel = Vector2Scale(pendulum->vel, damping);
