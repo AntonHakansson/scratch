@@ -6,7 +6,7 @@ exit # */
 #define assert(c)        while (!(c)) __builtin_unreachable()
 #define tassert(c)       while (!(c)) __builtin_trap()
 #define breakpoint(c)    ((c) ? ({ asm volatile ("int3; nop"); }) : 0)
-#define countof(a)       (Size)(sizeof(a) / sizeof(*(a)))
+#define countof(a)       (Iz)(sizeof(a) / sizeof(*(a)))
 #define new(a, t, n)     ((t *)arena_alloc(a, sizeof(t), _Alignof(t), (n)))
 #define newbeg(a, t, n)  ((t *)arena_alloc_beg(a, sizeof(t), _Alignof(t), (n)))
 #define s8(s)            (S8){(U8 *)s, countof(s)-1}
@@ -15,8 +15,8 @@ exit # */
 
 typedef unsigned char U8;
 typedef signed long long I64;
-typedef typeof((char *)0-(char *)0) Size;
-typedef typeof(sizeof(0))           USize;
+typedef typeof((char *)0-(char *)0) Iz;
+typedef typeof(sizeof(0))           Uz;
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena
@@ -24,17 +24,17 @@ typedef typeof(sizeof(0))           USize;
 typedef struct { U8 *beg;  U8  *end; } Arena;
 
 __attribute((malloc, alloc_size(4, 2), alloc_align(3)))
-static U8 *arena_alloc(Arena *a, Size objsize, Size align, Size count) {
-  Size padding = (USize)a->end & (align - 1);
+static U8 *arena_alloc(Arena *a, Iz objsize, Iz align, Iz count) {
+  Iz padding = (Uz)a->end & (align - 1);
   tassert((count <= (a->end - a->beg - padding) / objsize) && "out of memory");
-  Size total = objsize * count;
+  Iz total = objsize * count;
   return memset(a->end -= total + padding, 0, total);
 }
 
 __attribute((malloc, alloc_size(4, 2), alloc_align(3)))
-static U8 *arena_alloc_beg(Arena *a, Size objsize, Size align, Size count) {
-  Size padding = -(USize)(a->beg) & (align - 1);
-  Size total   = padding + objsize * count;
+static U8 *arena_alloc_beg(Arena *a, Iz objsize, Iz align, Iz count) {
+  Iz padding = -(Uz)(a->beg) & (align - 1);
+  Iz total   = padding + objsize * count;
   tassert(total < (a->end - a->beg) && "out of memory");
   U8 *p = a->beg + padding;
   memset(p, 0, objsize * count);
@@ -47,7 +47,7 @@ static U8 *arena_alloc_beg(Arena *a, Size objsize, Size align, Size count) {
 
 #define s8pri(s) (int)s.len, s.data
 
-typedef struct { U8 *data; Size len; } S8;
+typedef struct { U8 *data; Iz len; } S8;
 
 static S8 s8span(U8 *beg, U8 *end) { return (S8){beg, end - beg}; }
 
@@ -69,7 +69,7 @@ static S8 s8cstr(Arena *a, char *cstr) {
 #define s8concat(arena, head, ...)                                                   \
   s8concatv(arena, head, ((S8[]){__VA_ARGS__}), (countof(((S8[]){__VA_ARGS__}))))
 
-static S8 s8concatv(Arena *a, S8 head, S8 *ss, Size count) {
+static S8 s8concatv(Arena *a, S8 head, S8 *ss, Iz count) {
   S8 r = {0};
   if (!head.data || (U8 *)(head.data+head.len) != a->beg) {
     S8 copy = head;
@@ -77,7 +77,7 @@ static S8 s8concatv(Arena *a, S8 head, S8 *ss, Size count) {
     if (head.len) memcpy(copy.data, head.data, head.len);
     head = copy;
   }
-  for (Size i = 0; i < count; i++) {
+  for (Iz i = 0; i < count; i++) {
     S8 tail = ss[i];
     U8 *data = newbeg(a, U8, tail.len);
     if (tail.len) memcpy(data, tail.data, tail.len);
@@ -88,16 +88,16 @@ static S8 s8concatv(Arena *a, S8 head, S8 *ss, Size count) {
 }
 
 static S8 s8trimspace(S8 s) {
-  for (Size off = 0; off < s.len; off++) {
+  for (Iz off = 0; off < s.len; off++) {
     _Bool is_ws = (s.data[off] == ' ' || ((unsigned)s.data[off] - '\t') < 5);
     if (!is_ws) { return (S8){s.data + off, s.len - off}; }
   }
   return s;
 }
 
-static _Bool s8match(S8 a, S8 b, Size n) {
+static _Bool s8match(S8 a, S8 b, Iz n) {
   if (a.len < n || b.len < n)  { return 0; }
-  for (Size i = 0; i < n; i++) {
+  for (Iz i = 0; i < n; i++) {
     if (a.data[i] != b.data[i]) { return 0; }
   }
   return 1;
@@ -106,7 +106,7 @@ static _Bool s8match(S8 a, S8 b, Size n) {
 #define s8startswith(a, b) s8match((a), (b), (b).len)
 
 static S8 s8tolower(S8 s) {
-  for (Size i = 0; i < s.len; i++) {
+  for (Iz i = 0; i < s.len; i++) {
     if (((unsigned)s.data[i] - 'A') < 26) {
       s.data[i] |= 32;
     }
@@ -141,7 +141,7 @@ static S8 s8i64(Arena *arena, I64 x) {
   do {
     digits[--i] = (char)(x % 10) + '0';
   } while (x /= 10);
-  Size len = countof(digits) - i + negative;
+  Iz len = countof(digits) - i + negative;
   U8 *beg = newbeg(arena, U8, len);
   U8 *end = beg;
   if (negative) { *end++ = '-'; }
@@ -168,7 +168,7 @@ typedef struct ErrList {
   int max_severity;
 } ErrList;
 
-static ErrList *errors_make(Arena *arena, Size nbyte) {
+static ErrList *errors_make(Arena *arena, Iz nbyte) {
   assert(errors == 0);
   ErrList *r = new(arena, ErrList, 1);
   U8 *beg = new(arena, U8, nbyte);
@@ -183,14 +183,14 @@ static void errors_clear_() {
 }
 
 #define for_errors(varname)                                                    \
-  for (Size _defer_i_ = 1; _defer_i_; _defer_i_--, errors_clear_())            \
+  for (Iz _defer_i_ = 1; _defer_i_; _defer_i_--, errors_clear_())            \
     for (Err *varname = errors->first; varname && (errors->max_severity > 0);  \
          varname = varname->next)
 
 static Err *emit_err(int severity, S8 message) {
   assert(errors && errors->arena.beg);
   if ((errors->arena.end - errors->arena.beg) <
-      ((Size)sizeof(Err) + message.len + (1 << 8))) {
+      ((Iz)sizeof(Err) + message.len + (1 << 8))) {
     errors_clear_(); // REVIEW: force flush errors to stderr?
     emit_err(3, s8("Exceeded error memory limit. Previous errors omitted."));
   }
@@ -228,7 +228,7 @@ static S8 read_entire_file(Arena *arena, S8 file) {
   S8 r = {0};
   if (file.data) {
     int fd = 0;
-    Size len = 0;
+    Iz len = 0;
     {
       Arena scratch = *arena;
       char *f = s8z(&scratch, file);
@@ -250,9 +250,9 @@ static S8 read_entire_file(Arena *arena, S8 file) {
     U8 *end = beg;
     {
       Arena scratch = *arena;
-      Size m = len;
+      Iz m = len;
       while (m > 0) {
-        Size nbyte = 0;
+        Iz nbyte = 0;
         do {
           nbyte = read(fd, end, m);
         } while (nbyte < 0 && errno == EINTR);
@@ -281,8 +281,8 @@ static void write_file(Arena scratch, S8 file, S8 file_content) {
     }
 
     while (file_content.len > 0) {
-      Size m = file_content.len;
-      Size nbyte = 0;
+      Iz m = file_content.len;
+      Iz nbyte = 0;
       do {
         nbyte = write(fd, file_content.data, m);
       } while (nbyte < 0 && errno == EINTR);
@@ -310,8 +310,8 @@ typedef struct {
 
 typedef struct {
   Chunk *items;
-  Size capacity;
-  Size count;
+  Iz capacity;
+  Iz count;
 } Chunks;
 
 //{generate dynamic_array Chunks Chunk
@@ -397,7 +397,7 @@ static S8 generate(Arena *arena, S8 file_content)
   //- Extract generator chunks from source
   Chunks chunks = {0};
   {
-    Size curidx = -1;
+    Iz curidx = -1;
     S8pair line = (S8pair){{0}, file_content};
     while (line.tail.data) {
 
@@ -430,13 +430,12 @@ static S8 generate(Arena *arena, S8 file_content)
   }
 
   //- Generate content for chunks
-  for (Size i = 0; i < chunks.count; i++) {
+  for (Iz i = 0; i < chunks.count; i++) {
     Chunk *chunk = &chunks.items[i];
-    if (chunk->generated.len == 0)
-      chunk->generated = maybe_generate_dynamic_array(arena, chunk->command);
+    chunk->generated = maybe_generate_dynamic_array(arena, chunk->command);
 
     if (chunk->generated.len == 0) {
-      Size file_offset = (chunk->beg - file_content.data);
+      Iz file_offset = (chunk->beg - file_content.data);
       emit_err(1, s8concat(arena, s8("Unknown generator at file offset "), s8i64(arena, file_offset)));
     }
   }
@@ -446,7 +445,7 @@ static S8 generate(Arena *arena, S8 file_content)
   {
     U8 *beg = file_content.data;
     U8 *end = beg;
-    for (Size i = 0; i < chunks.count; i++) {
+    for (Iz i = 0; i < chunks.count; i++) {
       Chunk *chunk = &chunks.items[i];
       end = chunk->beg;
       S8 above = s8span(beg, end);
@@ -479,7 +478,6 @@ int main(int argc, char **argv)
   }
 
   U8 *heap = malloc(HEAP_CAP);
-  assert(heap);
   Arena arena[1] = { (Arena){heap, heap + HEAP_CAP}, };
 
   errors = errors_make(arena, 1 << 12);
@@ -495,8 +493,6 @@ int main(int argc, char **argv)
   for_errors(err) {
     fprintf(stderr, "[ERROR]: %.*s\n", s8pri(err->message));
   }
-
-  free(heap);
   return status_code;
 }
 #endif
