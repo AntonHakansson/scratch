@@ -21,7 +21,7 @@ typedef typeof(sizeof(0))           Uz;
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena
 
-typedef struct { U8 *beg;  U8  *end; } Arena;
+typedef struct { U8 *beg; U8 *end; } Arena;
 
 __attribute((malloc, alloc_size(4, 2), alloc_align(3)))
 static U8 *arena_alloc(Arena *a, Iz objsize, Iz align, Iz count) {
@@ -317,11 +317,17 @@ typedef struct {
 //{generate dynamic_array Chunks Chunk
 static void chunks_grow(Arena *a, Chunks *slice) {
   slice->capacity += !slice->capacity;
-  Chunk *data = new(a, Chunk, slice->capacity * 2);
-  if (slice->count)
-    memcpy(data, slice->items, sizeof(Chunk) * slice->count);
-  slice->items = data;
-  slice->capacity *= 2;
+  if (a->beg == (U8*)(slice->items + slice->count)) {
+    newbeg(a, Chunk, slice->capacity);
+    slice->capacity *= 2;
+  }
+  else {
+    Chunk *data = newbeg(a, Chunk, slice->capacity * 2);
+    if (slice->count)
+      memcpy(data, slice->items, sizeof(Chunk) * slice->count);
+    slice->items = data;
+    slice->capacity *= 2;
+  }
 }
 
 static Chunk *chunks_push(Arena *a, Chunks *slice) {
@@ -357,20 +363,30 @@ static S8 maybe_generate_dynamic_array(Arena *arena, S8 cmd) {
     if (count_member.len == 0) count_member = s8("count");
 
     S8 type_lower = s8tolower(s8dup(arena, type));
+    S8 grow_function_name   = s8concat(arena, grow_function_name, type_lower, s8("_grow"));
+    S8 slice_items = s8concat(arena, slice_items, s8("slice->"), items_member);
+    S8 slice_count = s8concat(arena, slice_count, s8("slice->"), count_member);
+    S8 slice_cap   = s8concat(arena, slice_cap, s8("slice->"), cap_member);
 
     S8 buf = {0};
     {
       // clang-format off
       buf =
         s8concat(arena, buf,
-                 s8("static void "), type_lower, s8("_grow"),
+                 s8("static void "), grow_function_name,
                  s8("(Arena *a, "), type, s8(" *slice"), s8(") {\n"),
-                 s8("  slice->"), cap_member, s8(" += !slice->"), cap_member, s8(";\n"),
-                 s8("  "), item_type, s8(" *data = new(a, "), item_type, s8(", slice->"), cap_member, s8(" * 2);\n"),
-                 s8("  if (slice->"), count_member, s8(")\n"),
-                 s8("    memcpy(data, slice->"), items_member, s8(", sizeof("), item_type, s8(") * slice->"), count_member, s8(");\n"),
-                 s8("  slice->"), items_member, s8(" = data;\n"),
-                 s8("  slice->"), cap_member, s8(" *= 2;\n"),
+                 s8("  "), slice_cap, s8(" += !"), slice_cap, s8(";\n"),
+                 s8("  if (a->beg == (U8*)("), slice_items, s8(" + "), slice_count, s8(")) {\n"),
+                 s8("    newbeg(a, "), item_type, s8(", "), slice_cap, s8(");\n"),
+                 s8("    "), slice_cap, s8(" *= 2;\n"),
+                 s8("  }\n"),
+                 s8("  else {\n"),
+                 s8("    "), item_type, s8(" *data = newbeg(a, "), item_type, s8(", "), slice_cap, s8(" * 2);\n"),
+                 s8("    if ("), slice_count, s8(")\n"),
+                 s8("      memcpy(data, "), slice_items, s8(", sizeof("), item_type, s8(") * "), slice_count, s8(");\n"),
+                 s8("    "), slice_items, s8(" = data;\n"),
+                 s8("    "), slice_cap, s8(" *= 2;\n"),
+                 s8("  }\n"),
                  s8("}\n"));
       // clang-format on
     }
@@ -381,9 +397,9 @@ static S8 maybe_generate_dynamic_array(Arena *arena, S8 cmd) {
         s8concat(arena, buf,
                  s8("static "), item_type, s8(" *"), type_lower, s8("_push"),
                  s8("(Arena *a, "), type, s8(" *slice"), s8(") {\n"),
-                 s8("  if (slice->"), count_member, s8(" >= slice->"), cap_member, s8(")\n"),
-                 s8("    "), type_lower, s8("_grow(a, slice);\n"),
-                 s8("  return slice->"), items_member, s8(" + slice->"), count_member, s8("++;\n"),
+                 s8("  if ("), slice_count, s8(" >= "), slice_cap, s8(")\n"),
+                 s8("    "), grow_function_name, s8("(a, slice);\n"),
+                 s8("  return "), slice_items, s8(" + "), slice_count, s8("++;\n"),
                  s8("}\n"));
       // clang-format on
     }
@@ -436,7 +452,7 @@ static S8 generate(Arena *arena, S8 file_content)
 
     if (chunk->generated.len == 0) {
       Iz file_offset = (chunk->beg - file_content.data);
-      emit_err(1, s8concat(arena, s8("Unknown generator at file offset "), s8i64(arena, file_offset)));
+      emit_err(1, s8concat(arena, s8("Unknown generator '"), chunk->command, s8("' at file offset "), s8i64(arena, file_offset)));
     }
   }
 
