@@ -408,6 +408,309 @@ static S8 maybe_generate_dynamic_array(Arena *arena, S8 cmd) {
   return (S8){0};
 }
 
+typedef struct Node Node;
+struct Node {
+  Node *next, *prev;
+};
+typedef struct {
+  Node *first, *last;
+} LinkedList;
+
+//{generate singly_linked_stack LinkedList Node
+static Node *linkedlist_stack_push(LinkedList *sll, Node *node) {
+  node->next = sll->first;
+  return sll->first = node;
+}
+
+static Node *linkedlist_stack_pop(LinkedList *sll) {
+  return sll->first ? (sll->first = sll->first->next) : 0;
+}
+//}
+
+//{generate singly_linked_queue LinkedList Node
+static Node *linkedlist_queue_push(LinkedList *sll, Node *node) {
+  if (sll->first) {
+    sll->last->next = node;
+    sll->last = node;
+  } else {
+    sll->first = sll->last = node;
+  }
+  node->next = 0;
+  return node;
+}
+
+static Node *linkedlist_queue_push_front(LinkedList *sll, Node *node) {
+  if (sll->first) {
+    node->next = sll->first;
+    sll->first = node;
+  } else {
+    sll->first = sll->last = node;
+  }
+  node->next = 0;
+  return node;
+}
+
+static Node *linkedlist_queue_pop(LinkedList *sll) {
+  if (sll->first == sll->last) {
+    return sll->first = sll->last = 0;
+  } else {
+    return sll->first = sll->first->next;
+  }
+}
+//}
+
+//{generate doubly_linked_list LinkedList Node
+static Node *linkedlist_list_push(LinkedList *dll, Node *node) {
+  if (dll->last) {
+    dll->last->next = node;
+  } else {
+    dll->first = node;
+  }
+  node->prev = dll->last;
+  node->next = 0;
+  dll->last = node;
+  return node;
+}
+
+static Node *linkedlist_list_push_front(LinkedList *dll, Node *node) {
+  if (dll->first) {
+    dll->first->next = node;
+  } else {
+    dll->last = node;
+  }
+  node->prev = 0;
+  node->next = dll->first;
+  dll->first = node;
+  return node;
+}
+
+static Node *linkedlist_list_remove(LinkedList *dll, Node *node) {
+  if (node->prev) {
+    node->prev->next = node->next;
+  } else {
+    dll->first = node->next;
+  }
+  if (node->next) {
+    node->next->prev = node->prev;
+  } else {
+    dll->last = node->prev;
+  }
+  node->next = node->prev = 0;
+  return node;
+}
+//}
+
+static S8 maybe_generate_singly_linked_stack(Arena *arena, S8 cmd) {
+  S8 result = {0};
+  if (s8startswith(cmd, s8("singly_linked_stack"))) {
+    S8pair tokens = s8cut(cmd, ' ');
+    S8 type          = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 node_type     = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 first_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 next_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+
+    if (type.len == 0) {
+      emit_err(3, s8("Expected container type as 1st argument"));
+      return (S8){0};
+    }
+    if (node_type.len == 0) {
+      emit_err(3, s8("Expected node-type as 2nd argument"));
+      return (S8){0};
+    }
+
+    if (first_member.len == 0) first_member = s8("first");
+    if ( next_member.len == 0) next_member = s8("next");
+
+    S8 type_lower = s8tolower(s8dup(arena, type));
+    S8 sll_first = s8concat(arena, s8("sll->"), first_member);
+    S8 node_next = s8concat(arena, s8("node->"), next_member);
+
+    {
+      result
+        = s8concat(arena, result,
+                   s8("static "), node_type, s8(" *"), type_lower,
+                   s8("_stack_push("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
+                   s8("  "), node_next, s8(" = "), sll_first, s8(";\n"),
+                   s8("  return "), sll_first, s8(" = node;\n}\n"),
+                  );
+    }
+    result = s8concat(arena, result, s8("\n"));
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_stack_pop("), type, s8(" *sll) {\n"),
+        s8("  return "), sll_first, s8(" ? "),
+        s8("("), sll_first, s8(" = "), sll_first, s8("->"), next_member, s8(")"),
+        s8(" : 0;\n"),
+        s8("}\n"));
+    }
+  }
+  return result;
+}
+
+static S8 maybe_generate_singly_linked_queue(Arena *arena, S8 cmd) {
+  S8 result = {0};
+  if (s8startswith(cmd, s8("singly_linked_queue"))) {
+    S8pair tokens = s8cut(cmd, ' ');
+    S8 type         = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 node_type    = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 first_member = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 last_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 next_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+
+    if (type.len == 0) {
+      emit_err(3, s8("Expected container type as 1st argument"));
+      return (S8){0};
+    }
+    if (node_type.len == 0) {
+      emit_err(3, s8("Expected node-type as 2nd argument"));
+      return (S8){0};
+    }
+
+    if (first_member.len == 0) first_member = s8("first");
+    if ( last_member.len == 0) last_member = s8("last");
+    if ( next_member.len == 0) next_member = s8("next");
+
+    S8 type_lower = s8tolower(s8dup(arena, type));
+    S8 sll_first = s8concat(arena, s8("sll->"), first_member);
+    S8 sll_first_next = s8concat(arena, sll_first, s8("->"), next_member);
+    S8 sll_last = s8concat(arena, s8("sll->"), last_member);
+    S8 last_next = s8concat(arena, sll_last, s8("->"), next_member);
+    S8 node_next = s8concat(arena, s8("node->"), next_member);
+
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_queue_push("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
+        s8("  if ("), sll_first, s8(") {\n"),
+        s8("    "), last_next, s8(" = node;\n"),
+        s8("    "), sll_last, s8(" = node;\n"),
+        s8("  } else {\n"),
+        s8("    "), sll_first, s8(" = "), sll_last, s8(" = "), s8("node;\n"),
+        s8("  }\n"),
+        s8("  "), node_next, s8(" = 0;\n"),
+        s8("  return node;\n"),
+        s8("}\n"));
+    }
+    result = s8concat(arena, result, s8("\n"));
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_queue_push_front("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
+        s8("  if ("), sll_first, s8(") {\n"),
+        s8("    "), node_next, s8(" = "), sll_first, s8(";\n"),
+        s8("    "), sll_first, s8(" = node;\n"),
+        s8("  } else {\n"),
+        s8("    "), sll_first, s8(" = "), sll_last, s8(" = "), s8("node;\n"),
+        s8("  }\n"),
+        s8("  "), node_next, s8(" = 0;\n"),
+        s8("  return node;\n"),
+        s8("}\n"));
+    }
+    result = s8concat(arena, result, s8("\n"));
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_queue_pop("), type, s8(" *sll) {\n"),
+        s8("  if ("), sll_first, s8(" == "), sll_last, s8(") {\n"),
+        s8("    return "), sll_first, s8(" = "), sll_last, s8(" = 0;\n"),
+        s8("  } else {\n"),
+        s8("    return "), sll_first, s8(" = "), sll_first_next, s8(";\n"),
+        s8("  }\n"),
+        s8("}\n"));
+    }
+  }
+  return result;
+}
+
+static S8 maybe_generate_doubly_linked_list(Arena *arena, S8 cmd) {
+  S8 result = {0};
+  if (s8startswith(cmd, s8("doubly_linked_list"))) {
+    S8pair tokens = s8cut(cmd, ' ');
+    S8 type         = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 node_type    = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 first_member = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 last_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 next_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+    S8 prev_member  = (tokens = s8cut(tokens.tail, ' ')).head;
+
+    if (type.len == 0) {
+      emit_err(3, s8("Expected container type as 1st argument"));
+      return (S8){0};
+    }
+    if (node_type.len == 0) {
+      emit_err(3, s8("Expected node-type as 2nd argument"));
+      return (S8){0};
+    }
+
+    if (first_member.len == 0) first_member = s8("first");
+    if ( last_member.len == 0) last_member = s8("last");
+    if ( next_member.len == 0) next_member = s8("next");
+    if ( prev_member.len == 0) prev_member = s8("prev");
+
+    S8 type_lower = s8tolower(s8dup(arena, type));
+    S8 dll_first = s8concat(arena, s8("dll->"), first_member);
+    S8 dll_first_next = s8concat(arena, dll_first, s8("->"), next_member);
+    S8 dll_last = s8concat(arena, s8("dll->"), last_member);
+    S8 last_next = s8concat(arena, dll_last, s8("->"), next_member);
+    S8 node_next = s8concat(arena, s8("node->"), next_member);
+    S8 node_prev = s8concat(arena, s8("node->"), prev_member);
+
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_list_push("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
+        s8("  if ("), dll_last, s8(") {\n"),
+        s8("    "), last_next, s8(" = node;\n"),
+        s8("  } else {\n"),
+        s8("    "), dll_first, s8(" = "), s8("node;\n"),
+        s8("  }\n"),
+        s8("  "), node_prev, s8(" = "), dll_last, s8(";\n"),
+        s8("  "), node_next, s8(" = 0;\n"),
+        s8("  "), dll_last, s8(" = node;\n"),
+        s8("  return node;\n"),
+        s8("}\n"));
+    }
+    result = s8concat(arena, result, s8("\n"));
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_list_push_front("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
+        s8("  if ("), dll_first, s8(") {\n"),
+        s8("    "), dll_first_next, s8(" = node;\n"),
+        s8("  } else {\n"),
+        s8("    "), dll_last, s8(" = "), s8("node;\n"),
+        s8("  }\n"),
+        s8("  "), node_prev, s8(" = 0;\n"),
+        s8("  "), node_next, s8(" = "), dll_first, s8(";\n"),
+        s8("  "), dll_first, s8(" = node;\n"),
+        s8("  return node;\n"),
+        s8("}\n"));
+    }
+    result = s8concat(arena, result, s8("\n"));
+    {
+      result = s8concat(arena, result,
+        s8("static "), node_type, s8(" *"), type_lower,
+        s8("_list_remove("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
+        s8("  if ("), node_prev, s8(") {\n"),
+        s8("    "), node_prev, s8("->"), next_member, s8(" = "), node_next, s8(";\n"),
+        s8("  } else {\n"),
+        s8("    "), dll_first, s8(" = "), node_next, s8(";\n"),
+        s8("  }\n"),
+        s8("  if ("), node_next, s8(") {\n"),
+        s8("    "), node_next, s8("->"), prev_member, s8(" = "), node_prev, s8(";\n"),
+        s8("  } else {\n"),
+        s8("    "), dll_last, s8(" = "), node_prev, s8(";\n"),
+        s8("  }\n"),
+        s8("  "), node_next, s8(" = "), node_prev, s8(" = 0"), s8(";\n"),
+        s8("  return node;\n"),
+        s8("}\n"));
+    }
+  }
+  return result;
+}
+
+
 static S8 generate(Arena *arena, S8 file_content)
 {
   //- Extract generator chunks from source
@@ -448,7 +751,14 @@ static S8 generate(Arena *arena, S8 file_content)
   //- Generate content for chunks
   for (Iz i = 0; i < chunks.count; i++) {
     Chunk *chunk = &chunks.items[i];
-    chunk->generated = maybe_generate_dynamic_array(arena, chunk->command);
+    if (chunk->generated.len == 0)
+      chunk->generated = maybe_generate_dynamic_array(arena, chunk->command);
+    if (chunk->generated.len == 0)
+      chunk->generated = maybe_generate_singly_linked_stack(arena, chunk->command);
+    if (chunk->generated.len == 0)
+      chunk->generated = maybe_generate_singly_linked_queue(arena, chunk->command);
+    if (chunk->generated.len == 0)
+      chunk->generated = maybe_generate_doubly_linked_list(arena, chunk->command);
 
     if (chunk->generated.len == 0) {
       Iz file_offset = (chunk->beg - file_content.data);
