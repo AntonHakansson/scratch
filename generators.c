@@ -9,9 +9,9 @@ exit # */
 #define countof(a)       (Iz)(sizeof(a) / sizeof(*(a)))
 #define new(a, t, n)     ((t *)arena_alloc(a, sizeof(t), _Alignof(t), (n)))
 #define newbeg(a, t, n)  ((t *)arena_alloc_beg(a, sizeof(t), _Alignof(t), (n)))
-#define s8(s)            (S8){(U8 *)s, countof(s)-1}
 #define memcpy(d, s, n)  __builtin_memcpy(d, s, n)
 #define memset(d, c, n)  __builtin_memset(d, c, n)
+#define strlen(s)        __builtin_strlen(s)
 
 typedef unsigned char U8;
 typedef signed long long I64;
@@ -45,6 +45,7 @@ static U8 *arena_alloc_beg(Arena *a, Iz objsize, Iz align, Iz count) {
 ////////////////////////////////////////////////////////////////////////////////
 //- String
 
+#define s8(X) _Generic((X), default: s8x_iden_, char *: s8x_lit_)((X))
 #define s8pri(s) (int)s.len, s.data
 
 typedef struct { U8 *data; Iz len; } S8;
@@ -66,9 +67,6 @@ static S8 s8cstr(Arena *a, char *cstr) {
   return s8dup(a, (S8){(U8*)cstr, __builtin_strlen(cstr)});
 }
 
-#define s8concat(arena, head, ...)                                                   \
-  s8concatv(arena, head, ((S8[]){__VA_ARGS__}), (countof(((S8[]){__VA_ARGS__}))))
-
 static S8 s8concatv(Arena *a, S8 head, S8 *ss, Iz count) {
   S8 r = {0};
   if (!head.data || (U8 *)(head.data+head.len) != a->beg) {
@@ -86,6 +84,31 @@ static S8 s8concatv(Arena *a, S8 head, S8 *ss, Iz count) {
   r = head;
   return r;
 }
+
+#define s8concat(arena, head, ...) \
+  s8concatv(arena, s8(head), (S8[]){s8X_APPLY(__VA_ARGS__)}, countof((S8[]){s8X_APPLY(__VA_ARGS__)}));
+
+// s8concat convenience monstrosity
+static S8 s8x_iden_(S8 s) { return s; }
+static S8 s8x_lit_(char *s) { return (S8){(U8 *)s, strlen(s)}; }
+#define s8X_APPLY1(a) s8(a)
+#define s8X_APPLY2(a, b) s8(a), s8(b)
+#define s8X_APPLY3(a, b, c) s8(a), s8(b), s8(c)
+#define s8X_APPLY4(a, b, c, d) s8(a), s8(b), s8(c), s8(d)
+#define s8X_APPLY5(a, b, c, d, e) s8(a), s8(b), s8(c), s8(d), s8(e)
+#define s8X_APPLY6(a, b, c, d, e, f) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f)
+#define s8X_APPLY7(a, b, c, d, e, f, g) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g)
+#define s8X_APPLY8(a, b, c, d, e, f, g, h) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h)
+#define s8X_APPLY9(a, b, c, d, e, f, g, h, i) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i)
+#define s8X_APPLY10(a, b, c, d, e, f, g, h, i, j) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j)
+#define s8X_APPLY11(a, b, c, d, e, f, g, h, i, j, k) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k)
+#define s8X_APPLY12(a, b, c, d, e, f, g, h, i, j, k, l) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k), s8(l)
+#define s8X_APPLY13(a, b, c, d, e, f, g, h, i, j, k, l, m) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k), s8(l), s8(m)
+#define s8X_APPLY14(a, b, c, d, e, f, g, h, i, j, k, l, m, n) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k), s8(l), s8(m), s8(n)
+#define s8X_APPLY15(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k), s8(l), s8(m), s8(n), s8(o)
+#define s8X_APPLY16(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) s8(a), s8(b), s8(c), s8(d), s8(e), s8(f), s8(g), s8(h), s8(i), s8(j), s8(k), s8(l), s8(m), s8(n), s8(o), s8(p)
+#define s8X_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,NAME,...) NAME
+#define s8X_APPLY(...) s8X_GET_MACRO(__VA_ARGS__, s8X_APPLY16, s8X_APPLY15, s8X_APPLY14, s8X_APPLY13, s8X_APPLY12, s8X_APPLY11, s8X_APPLY10, s8X_APPLY9, s8X_APPLY8, s8X_APPLY7, s8X_APPLY6, s8X_APPLY5, s8X_APPLY4, s8X_APPLY3, s8X_APPLY2, s8X_APPLY1)(__VA_ARGS__)
 
 static S8 s8trimspace(S8 s) {
   for (Iz off = 0; off < s.len; off++) {
@@ -340,7 +363,7 @@ static Chunk *chunks_push(Arena *a, Chunks *slice) {
 ////////////////////////////////////////////////////////////////////////////////
 //- Program
 
-static S8 maybe_generate_dynamic_array(Arena *arena, S8 cmd) {
+static S8 maybe_generate_dynamic_array(Arena *a, S8 cmd) {
   if (s8startswith(cmd, s8("dynamic_array"))) {
     S8pair tokens = s8cut(cmd, ' ');
     S8 type         = (tokens = s8cut(tokens.tail, ' ')).head;
@@ -362,48 +385,43 @@ static S8 maybe_generate_dynamic_array(Arena *arena, S8 cmd) {
     if (  cap_member.len == 0)   cap_member = s8("capacity");
     if (count_member.len == 0) count_member = s8("count");
 
-    S8 type_lower = s8tolower(s8dup(arena, type));
-    S8 grow_function_name   = s8concat(arena, grow_function_name, type_lower, s8("_grow"));
-    S8 slice_items = s8concat(arena, slice_items, s8("slice->"), items_member);
-    S8 slice_count = s8concat(arena, slice_count, s8("slice->"), count_member);
-    S8 slice_cap   = s8concat(arena, slice_cap, s8("slice->"), cap_member);
+    S8 type_lower = s8tolower(s8dup(a, type));
+    S8 grow_function_name = s8concat(a, type_lower, "_grow");
+    S8 push_function_name = s8concat(a, type_lower, "_push");
+    S8 slice_items = s8concat(a, slice_items, "slice->", items_member);
+    S8 slice_count = s8concat(a, slice_count, "slice->", count_member);
+    S8 slice_cap   = s8concat(a, slice_cap, "slice->", cap_member);
 
-    S8 buf = {0};
+    S8 b = {0};
     {
       // clang-format off
-      buf =
-        s8concat(arena, buf,
-                 s8("static void "), grow_function_name,
-                 s8("(Arena *a, "), type, s8(" *slice"), s8(") {\n"),
-                 s8("  "), slice_cap, s8(" += !"), slice_cap, s8(";\n"),
-                 s8("  if (a->beg == (U8*)("), slice_items, s8(" + "), slice_count, s8(")) {\n"),
-                 s8("    newbeg(a, "), item_type, s8(", "), slice_cap, s8(");\n"),
-                 s8("    "), slice_cap, s8(" *= 2;\n"),
-                 s8("  }\n"),
-                 s8("  else {\n"),
-                 s8("    "), item_type, s8(" *data = newbeg(a, "), item_type, s8(", "), slice_cap, s8(" * 2);\n"),
-                 s8("    if ("), slice_count, s8(")\n"),
-                 s8("      memcpy(data, "), slice_items, s8(", sizeof("), item_type, s8(") * "), slice_count, s8(");\n"),
-                 s8("    "), slice_items, s8(" = data;\n"),
-                 s8("    "), slice_cap, s8(" *= 2;\n"),
-                 s8("  }\n"),
-                 s8("}\n"));
+      b = s8concat(a, b, "static void ", grow_function_name, "(Arena *a, ", type, " *slice) {\n");
+      b = s8concat(a, b, "  ", slice_cap, " += !", slice_cap, ";\n");
+      b = s8concat(a, b, "  if (a->beg == (U8*)(", slice_items, " + ", slice_count, ")) {\n");
+      b = s8concat(a, b, "    newbeg(a, ", item_type, ", ", slice_cap, ");\n");
+      b = s8concat(a, b, "    ", slice_cap, " *= 2;\n");
+      b = s8concat(a, b, "  }\n");
+      b = s8concat(a, b, "  else {\n");
+      b = s8concat(a, b, "    ", item_type, " *data = newbeg(a, ", item_type, ", ", slice_cap, " * 2)" ";\n");
+      b = s8concat(a, b, "    if (", slice_count, ")\n");
+      b = s8concat(a, b, "      memcpy(data, ", slice_items, ", sizeof(", item_type, ") * ", slice_count, ");\n");
+      b = s8concat(a, b, "    ", slice_items, " = data;\n");
+      b = s8concat(a, b, "    ", slice_cap, " *= 2;\n");
+      b = s8concat(a, b, "  }\n");
+      b = s8concat(a, b, "}\n");
       // clang-format on
     }
-    buf = s8concat(arena, buf, s8("\n"));
+    b = s8concat(a, b, s8("\n"));
     {
       // clang-format off
-      buf =
-        s8concat(arena, buf,
-                 s8("static "), item_type, s8(" *"), type_lower, s8("_push"),
-                 s8("(Arena *a, "), type, s8(" *slice"), s8(") {\n"),
-                 s8("  if ("), slice_count, s8(" >= "), slice_cap, s8(")\n"),
-                 s8("    "), grow_function_name, s8("(a, slice);\n"),
-                 s8("  return "), slice_items, s8(" + "), slice_count, s8("++;\n"),
-                 s8("}\n"));
+      b = s8concat(a, b, "static ", item_type, " *", push_function_name, "(Arena *a, ", type, " *slice", ") {\n");
+      b = s8concat(a, b, "  if (", slice_count, " >= ", slice_cap, ")\n");
+      b = s8concat(a, b, "    ", grow_function_name, "(a, slice);\n");
+      b = s8concat(a, b, "  return ", slice_items, " + ", slice_count, "++;\n");
+      b = s8concat(a, b, "}\n");
       // clang-format on
     }
-    return buf;
+    return b;
   }
   return (S8){0};
 }
@@ -500,8 +518,8 @@ static Node *linkedlist_list_remove(LinkedList *dll, Node *node) {
 }
 //}
 
-static S8 maybe_generate_singly_linked_stack(Arena *arena, S8 cmd) {
-  S8 result = {0};
+static S8 maybe_generate_singly_linked_stack(Arena *a, S8 cmd) {
+  S8 r = {0};
   if (s8startswith(cmd, s8("singly_linked_stack"))) {
     S8pair tokens = s8cut(cmd, ' ');
     S8 type          = (tokens = s8cut(tokens.tail, ' ')).head;
@@ -521,35 +539,32 @@ static S8 maybe_generate_singly_linked_stack(Arena *arena, S8 cmd) {
     if (first_member.len == 0) first_member = s8("first");
     if ( next_member.len == 0) next_member = s8("next");
 
-    S8 type_lower = s8tolower(s8dup(arena, type));
-    S8 sll_first = s8concat(arena, s8("sll->"), first_member);
-    S8 node_next = s8concat(arena, s8("node->"), next_member);
+    S8 type_lower = s8tolower(s8dup(a, type));
+    S8 sll_first = s8concat(a, "sll->", first_member);
+    S8 node_next = s8concat(a, "node->", next_member);
 
     {
-      result
-        = s8concat(arena, result,
-                   s8("static "), node_type, s8(" *"), type_lower,
-                   s8("_stack_push("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
-                   s8("  "), node_next, s8(" = "), sll_first, s8(";\n"),
-                   s8("  return "), sll_first, s8(" = node;\n}\n"),
-                  );
+      r = s8concat(a, r, "static ", node_type, " *",
+                         type_lower, "_stack_push(", type, " *sll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  ", node_next, " = ", sll_first, ";\n");
+      r = s8concat(a, r, "  return ", sll_first, " = node;\n");
+      r = s8concat(a, r, "}\n");
     }
-    result = s8concat(arena, result, s8("\n"));
+    r = s8concat(a, r, "\n");
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_stack_pop("), type, s8(" *sll) {\n"),
-        s8("  return "), sll_first, s8(" ? "),
-        s8("("), sll_first, s8(" = "), sll_first, s8("->"), next_member, s8(")"),
-        s8(" : 0;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *",
+                         type_lower, "_stack_pop(", type, " *sll) {\n");
+      r = s8concat(a, r, "  return ", sll_first, " ? ",
+                   "(", sll_first, " = ", sll_first, "->", next_member, ")",
+                   " : 0;\n");
+      r = s8concat(a, r, "}\n");
     }
   }
-  return result;
+  return r;
 }
 
-static S8 maybe_generate_singly_linked_queue(Arena *arena, S8 cmd) {
-  S8 result = {0};
+static S8 maybe_generate_singly_linked_queue(Arena *a, S8 cmd) {
+  S8 r = {0};
   if (s8startswith(cmd, s8("singly_linked_queue"))) {
     S8pair tokens = s8cut(cmd, ' ');
     S8 type         = (tokens = s8cut(tokens.tail, ' ')).head;
@@ -571,60 +586,57 @@ static S8 maybe_generate_singly_linked_queue(Arena *arena, S8 cmd) {
     if ( last_member.len == 0) last_member = s8("last");
     if ( next_member.len == 0) next_member = s8("next");
 
-    S8 type_lower = s8tolower(s8dup(arena, type));
-    S8 sll_first = s8concat(arena, s8("sll->"), first_member);
-    S8 sll_first_next = s8concat(arena, sll_first, s8("->"), next_member);
-    S8 sll_last = s8concat(arena, s8("sll->"), last_member);
-    S8 last_next = s8concat(arena, sll_last, s8("->"), next_member);
-    S8 node_next = s8concat(arena, s8("node->"), next_member);
+    S8 type_lower = s8tolower(s8dup(a, type));
+    S8 sll_first = s8concat(a, "sll->", first_member);
+    S8 sll_first_next = s8concat(a, sll_first, "->", next_member);
+    S8 sll_last = s8concat(a, "sll->", last_member);
+    S8 last_next = s8concat(a, sll_last, "->", next_member);
+    S8 node_next = s8concat(a, "node->", next_member);
 
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_queue_push("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
-        s8("  if ("), sll_first, s8(") {\n"),
-        s8("    "), last_next, s8(" = node;\n"),
-        s8("    "), sll_last, s8(" = node;\n"),
-        s8("  } else {\n"),
-        s8("    "), sll_first, s8(" = "), sll_last, s8(" = "), s8("node;\n"),
-        s8("  }\n"),
-        s8("  "), node_next, s8(" = 0;\n"),
-        s8("  return node;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                   "_queue_push(", type, " *sll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  if (", sll_first, ") {\n");
+      r = s8concat(a, r, "    ", last_next, " = node;\n");
+      r = s8concat(a, r, "    ", sll_last, " = node;\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", sll_first, " = ", sll_last, " = ", "node;\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  ", node_next, " = 0;\n");
+      r = s8concat(a, r, "  return node;\n");
+      r = s8concat(a, r, "}\n");
     }
-    result = s8concat(arena, result, s8("\n"));
+    r = s8concat(a, r, "\n");
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_queue_push_front("), type, s8(" *sll, "), node_type, s8(" *node) {\n"),
-        s8("  if ("), sll_first, s8(") {\n"),
-        s8("    "), node_next, s8(" = "), sll_first, s8(";\n"),
-        s8("    "), sll_first, s8(" = node;\n"),
-        s8("  } else {\n"),
-        s8("    "), sll_first, s8(" = "), sll_last, s8(" = "), s8("node;\n"),
-        s8("  }\n"),
-        s8("  "), node_next, s8(" = 0;\n"),
-        s8("  return node;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                        "_queue_push_front(", type, " *sll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  if (", sll_first, ") {\n");
+      r = s8concat(a, r, "    ", node_next, " = ", sll_first, ";\n");
+      r = s8concat(a, r, "    ", sll_first, " = node;\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", sll_first, " = ", sll_last, " = ", "node;\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  ", node_next, " = 0;\n");
+      r = s8concat(a, r, "  return node;\n");
+      r = s8concat(a, r, "}\n");
     }
-    result = s8concat(arena, result, s8("\n"));
+    r = s8concat(a, r, "\n");
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_queue_pop("), type, s8(" *sll) {\n"),
-        s8("  if ("), sll_first, s8(" == "), sll_last, s8(") {\n"),
-        s8("    return "), sll_first, s8(" = "), sll_last, s8(" = 0;\n"),
-        s8("  } else {\n"),
-        s8("    return "), sll_first, s8(" = "), sll_first_next, s8(";\n"),
-        s8("  }\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                   "_queue_pop(", type, " *sll) {\n");
+      r = s8concat(a, r, "  if (", sll_first, " == ", sll_last, ") {\n");
+      r = s8concat(a, r, "    return ", sll_first, " = ", sll_last, " = 0;\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    return ", sll_first, " = ", sll_first_next, ";\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "}\n");
     }
   }
-  return result;
+  return r;
 }
 
-static S8 maybe_generate_doubly_linked_list(Arena *arena, S8 cmd) {
-  S8 result = {0};
+static S8 maybe_generate_doubly_linked_list(Arena *a, S8 cmd) {
+  S8 r = {0};
   if (s8startswith(cmd, s8("doubly_linked_list"))) {
     S8pair tokens = s8cut(cmd, ' ');
     S8 type         = (tokens = s8cut(tokens.tail, ' ')).head;
@@ -648,66 +660,63 @@ static S8 maybe_generate_doubly_linked_list(Arena *arena, S8 cmd) {
     if ( next_member.len == 0) next_member = s8("next");
     if ( prev_member.len == 0) prev_member = s8("prev");
 
-    S8 type_lower = s8tolower(s8dup(arena, type));
-    S8 dll_first = s8concat(arena, s8("dll->"), first_member);
-    S8 dll_first_next = s8concat(arena, dll_first, s8("->"), next_member);
-    S8 dll_last = s8concat(arena, s8("dll->"), last_member);
-    S8 last_next = s8concat(arena, dll_last, s8("->"), next_member);
-    S8 node_next = s8concat(arena, s8("node->"), next_member);
-    S8 node_prev = s8concat(arena, s8("node->"), prev_member);
+    S8 type_lower = s8tolower(s8dup(a, type));
+    S8 dll_first = s8concat(a, "dll->", first_member);
+    S8 dll_first_next = s8concat(a, dll_first, "->", next_member);
+    S8 dll_last = s8concat(a, "dll->", last_member);
+    S8 last_next = s8concat(a, dll_last, "->", next_member);
+    S8 node_next = s8concat(a, "node->", next_member);
+    S8 node_prev = s8concat(a, "node->", prev_member);
 
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_list_push("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
-        s8("  if ("), dll_last, s8(") {\n"),
-        s8("    "), last_next, s8(" = node;\n"),
-        s8("  } else {\n"),
-        s8("    "), dll_first, s8(" = "), s8("node;\n"),
-        s8("  }\n"),
-        s8("  "), node_prev, s8(" = "), dll_last, s8(";\n"),
-        s8("  "), node_next, s8(" = 0;\n"),
-        s8("  "), dll_last, s8(" = node;\n"),
-        s8("  return node;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                   "_list_push(", type, " *dll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  if (", dll_last, ") {\n");
+      r = s8concat(a, r, "    ", last_next, " = node;\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", dll_first, " = ", "node;\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  ", node_prev, " = ", dll_last, ";\n");
+      r = s8concat(a, r, "  ", node_next, " = 0;\n");
+      r = s8concat(a, r, "  ", dll_last, " = node;\n");
+      r = s8concat(a, r, "  return node;\n");
+      r = s8concat(a, r, "}\n");
     }
-    result = s8concat(arena, result, s8("\n"));
+    r = s8concat(a, r, "\n");
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_list_push_front("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
-        s8("  if ("), dll_first, s8(") {\n"),
-        s8("    "), dll_first_next, s8(" = node;\n"),
-        s8("  } else {\n"),
-        s8("    "), dll_last, s8(" = "), s8("node;\n"),
-        s8("  }\n"),
-        s8("  "), node_prev, s8(" = 0;\n"),
-        s8("  "), node_next, s8(" = "), dll_first, s8(";\n"),
-        s8("  "), dll_first, s8(" = node;\n"),
-        s8("  return node;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                   "_list_push_front(", type, " *dll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  if (", dll_first, ") {\n");
+      r = s8concat(a, r, "    ", dll_first_next, " = node;\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", dll_last, " = ", "node;\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  ", node_prev, " = 0;\n");
+      r = s8concat(a, r, "  ", node_next, " = ", dll_first, ";\n");
+      r = s8concat(a, r, "  ", dll_first, " = node;\n");
+      r = s8concat(a, r, "  return node;\n");
+      r = s8concat(a, r, "}\n");
     }
-    result = s8concat(arena, result, s8("\n"));
+    r = s8concat(a, r, "\n");
     {
-      result = s8concat(arena, result,
-        s8("static "), node_type, s8(" *"), type_lower,
-        s8("_list_remove("), type, s8(" *dll, "), node_type, s8(" *node) {\n"),
-        s8("  if ("), node_prev, s8(") {\n"),
-        s8("    "), node_prev, s8("->"), next_member, s8(" = "), node_next, s8(";\n"),
-        s8("  } else {\n"),
-        s8("    "), dll_first, s8(" = "), node_next, s8(";\n"),
-        s8("  }\n"),
-        s8("  if ("), node_next, s8(") {\n"),
-        s8("    "), node_next, s8("->"), prev_member, s8(" = "), node_prev, s8(";\n"),
-        s8("  } else {\n"),
-        s8("    "), dll_last, s8(" = "), node_prev, s8(";\n"),
-        s8("  }\n"),
-        s8("  "), node_next, s8(" = "), node_prev, s8(" = 0"), s8(";\n"),
-        s8("  return node;\n"),
-        s8("}\n"));
+      r = s8concat(a, r, "static ", node_type, " *", type_lower,
+                   "_list_remove(", type, " *dll, ", node_type, " *node) {\n");
+      r = s8concat(a, r, "  if (", node_prev, ") {\n");
+      r = s8concat(a, r, "    ", node_prev, "->", next_member, " = ", node_next, ";\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", dll_first, " = ", node_next, ";\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  if (", node_next, ") {\n");
+      r = s8concat(a, r, "    ", node_next, "->", prev_member, " = ", node_prev, ";\n");
+      r = s8concat(a, r, "  } else {\n");
+      r = s8concat(a, r, "    ", dll_last, " = ", node_prev, ";\n");
+      r = s8concat(a, r, "  }\n");
+      r = s8concat(a, r, "  ", node_next, " = ", node_prev, " = 0", ";\n");
+      r = s8concat(a, r, "  return node;\n");
+      r = s8concat(a, r, "}\n");
     }
   }
-  return result;
+  return r;
 }
 
 
@@ -762,7 +771,9 @@ static S8 generate(Arena *arena, S8 file_content)
 
     if (chunk->generated.len == 0) {
       Iz file_offset = (chunk->beg - file_content.data);
-      emit_err(1, s8concat(arena, s8("Unknown generator '"), chunk->command, s8("' at file offset "), s8i64(arena, file_offset)));
+      S8 file_offset_s = s8i64(arena, file_offset);
+      S8 err_s = s8concat(arena, "Unknown generator '", chunk->command, "' at file offset ", file_offset_s);
+      emit_err(1, err_s);
     }
   }
 
@@ -809,7 +820,7 @@ int main(int argc, char **argv)
   errors = errors_make(arena, 1 << 12);
 
   S8 file   = s8cstr(arena, argv[1]);
-  S8 backup = s8concat(arena, file, s8(".backup"));
+  S8 backup = s8concat(arena, file, ".backup");
   S8 file_content = read_entire_file(arena, file);
   S8 new_content = generate(arena, file_content);
   write_file(*arena, backup, file_content);
