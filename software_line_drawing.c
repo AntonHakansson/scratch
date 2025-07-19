@@ -1,6 +1,6 @@
 #if IN_SHELL /* $ bash software_line_drawing.c
 cc software_line_drawing.c -o software_line_drawing    -fsanitize=undefined -Wall -g3 -O0 -lpthread -lraylib
-cc software_line_drawing.c -o software_line_drawing.so -DBUILD_RELOADABLE -fsanitize=undefined -Wall -g3 -O0 -shared -fPIC -lraylib -Wno-unused-function
+cc software_line_drawing.c -o software_line_drawing.so -DBUILD_RELOADABLE -fsanitize=undefined -Wall -g3 -O0 -shared -fPIC -lraylib -Wno-unused-function -march=native
 # cc software_line_drawing.c -o software_line_drawing    -DAMALGAMATION -Wall -O3 -lpthread -lraylib
 exit # */
 #endif
@@ -48,7 +48,6 @@ static U8 *arena_alloc(Arena *a, Iz objsize, Iz align, Iz count) {
 typedef struct {
   Arena *perm;
   Arena *frame;
-  Arena *read_only;
 } App_Update_Params;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -400,6 +399,108 @@ static IVec2s line_float(Arena *a, int x1, int y1, int x2, int y2) {
   return r;
 }
 
+#include <immintrin.h>
+static int line_float_simd_horiz(Arena *a, int x1, int y1, int x2, int y2, int **xs, int **ys) {
+  _Bool do_swap = x2 - x1 < 0;
+  if (do_swap) {
+    int tx = x1, ty = y1;
+    x1 = x2; y1 = y2;
+    x2 = tx; y2 = ty;
+  }
+  int dx = x2 - x1;
+  int dy = y2 - y1;
+
+  if (abs(dy) > abs(dx)) return 0;
+
+  __m256 y0_vec = _mm256_set1_ps(y1);
+  __m256i x0_vec = _mm256_set1_epi32(x1);
+  __m256 slope_vec = _mm256_set1_ps((float)dy / (float)dx);
+  __m256i step_vec = _mm256_setr_epi32(0,1,2,3,4,5,6,7);
+
+  int count = dx + 1;
+  int padded_count = ((count + 7) / 8) * 8;
+  *xs = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+  *ys = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+
+  __m256i dx_vec = step_vec;
+  for (int i = 0; i < count; i += 8) {
+    // Current x values: x1 + i, x1 + i+1, ...
+    __m256i x_vec = _mm256_add_epi32(x0_vec, dx_vec);
+
+    // Calculate y = y1 + slope * (x - x1)
+    __m256 y_ps_vec = _mm256_fmadd_ps(slope_vec, _mm256_cvtepi32_ps(dx_vec), y0_vec);
+    __m256i y_vec = _mm256_cvtps_epi32(y_ps_vec);
+
+    // Store results
+    _mm256_storeu_si256((__m256i *)&(*xs)[i], x_vec);
+    _mm256_storeu_si256((__m256i *)&(*ys)[i], y_vec);
+
+    dx_vec = _mm256_add_epi32(dx_vec, _mm256_set1_epi32(8));
+  }
+
+  return count;
+}
+
+static int line_float_simd_vert(Arena *a, int x1, int y1, int x2, int y2, int **xs, int **ys) {
+  _Bool do_swap = y2 - y1 < 0;
+  if (do_swap) {
+    int tx = x1, ty = y1;
+    x1 = x2; y1 = y2;
+    x2 = tx; y2 = ty;
+  }
+  int dx = x2 - x1;
+  int dy = y2 - y1;
+
+  if (abs(dx) > abs(dy)) return 0;
+
+  __m256  x0_vec = _mm256_set1_ps(x1);
+  __m256i y0_vec = _mm256_set1_epi32(y1);
+  __m256 slope_vec = _mm256_set1_ps((float)dx / (float)dy);
+  __m256i step_vec = _mm256_setr_epi32(0,1,2,3,4,5,6,7);
+
+  int count = dy + 1;
+  int padded_count = ((count + 7) / 8) * 8;
+  *xs = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+  *ys = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+
+  __m256i dy_vec = step_vec;
+  for (int i = 0; i < count; i += 8) {
+    // Current x values: x1 + i, x1 + i+1, ...
+    __m256i y_vec = _mm256_add_epi32(y0_vec, dy_vec);
+
+    // Calculate x = x0 + slope * (y - y0)
+    __m256 x_ps_vec = _mm256_fmadd_ps(slope_vec, _mm256_cvtepi32_ps(dy_vec), x0_vec);
+    __m256i x_vec = _mm256_cvtps_epi32(x_ps_vec);
+
+    // Store results
+    _mm256_storeu_si256((__m256i *)&(*xs)[i], x_vec);
+    _mm256_storeu_si256((__m256i *)&(*ys)[i], y_vec);
+
+    dy_vec = _mm256_add_epi32(dy_vec, _mm256_set1_epi32(8));
+  }
+
+  return count;
+}
+
+static int line_float_simd_ex(Arena *a, int x1, int y1, int x2, int y2, int **xs, int **ys) {
+  int dx = x2 - x1;
+  int dy = y2 - y1;
+  if (abs(dy) > abs(dx)) {
+    return line_float_simd_vert(a, x1, y1, x2, y2, xs, ys);
+  } else {
+    return line_float_simd_horiz(a, x1, y1, x2, y2, xs, ys);
+  }
+}
+
+static IVec2s line_float_simd(Arena *a, Arena scratch, int x1, int y1, int x2, int y2) {
+  int *xs = 0, *ys = 0;
+  int count = line_float_simd_ex(&scratch, x1, y1, x2, y2, &xs, &ys);
+  IVec2s r = {0};
+  for (int i = 0; i < count; i++) {
+    *ivec2s_push(a, &r) = (IVec2){ xs[i], ys[i] };
+  }
+  return r;
+}
 
 typedef struct {
   int dim;
@@ -569,6 +670,7 @@ void *update(App_Update_Params params, void *pstate) {
     int yoffset = (visualization == 1) ? 2 : 0;
     grid_draw_pixels(grid, line_float(p->frame, p1.x, p1.y, p2.x, p2.y), 0xFFFF0000);
     grid_draw_pixels(grid, line_bresenham(p->frame, p1.x, p1.y + yoffset, p2.x, p2.y + yoffset), 0xFF0000FF);
+    grid_draw_pixels(grid, line_float_simd(p->frame, *p->perm, p1.x, p1.y + yoffset * 2, p2.x, p2.y + yoffset * 2), 0xFFFFFFFF);
   }
 
   // Render high resolution line p1, p2
