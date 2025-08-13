@@ -287,25 +287,29 @@ static void check_correctness() {
 
   U64 rng = 1;
   static char haystack[63];
-  fill(haystack, countof(haystack), (U64)&rng);
 
-  static char needle[max_needle_len + 1] = {0};
-  for (Iz needle_len = 1; needle_len <= max_needle_len; needle_len++) {
-    for (Iz should_fill_needle_randomly = 0; should_fill_needle_randomly < 2; should_fill_needle_randomly++) {
-      if (should_fill_needle_randomly) {
-        fill(needle, needle_len, (U64)&rng + 5);
-        needle[needle_len] = '\0';
-      } else {
-        memcpy(needle, haystack + countof(haystack) - 1 - needle_len, needle_len);
-        needle[needle_len] = '\0';
-      }
+  for (Iz haystack_len = 1; haystack_len <= countof(haystack); haystack_len++) {
+    fill(haystack, haystack_len, (U64)&rng);
+    haystack[haystack_len - 1] = '\0';
 
-      ptrdiff_t actual = wrapped_strstr(haystack, needle);
-      ptrdiff_t got = search_rabin_karp_avx2(haystack, strlen(haystack),
-                                             needle, strlen(needle));
-      if (got != actual) {
-        printf("ERROR: Expected %ld but got %ld for:\nhaystack: %s\nneedle: %s\n",
-               actual, got, haystack, needle);
+    static char needle[max_needle_len + 1] = {0};
+    for (Iz needle_len = 1; needle_len <= max_needle_len; needle_len++) {
+      for (Iz should_fill_needle_randomly = 0; should_fill_needle_randomly < 2; should_fill_needle_randomly++) {
+        if (should_fill_needle_randomly) {
+          fill(needle, needle_len, (U64)&rng + 5);
+          needle[needle_len] = '\0';
+        } else {
+          memcpy(needle, haystack + countof(haystack) - 1 - needle_len, needle_len);
+          needle[needle_len] = '\0';
+        }
+
+        ptrdiff_t actual = wrapped_strstr(haystack, needle);
+        ptrdiff_t got = search_rabin_karp_avx2(haystack, strlen(haystack),
+                                               needle, strlen(needle));
+        if (got != actual) {
+          printf("ERROR: Expected %ld but got %ld for:\nhaystack: %s\nneedle: %s\n",
+                 actual, got, haystack, needle);
+        }
       }
     }
   }
@@ -333,9 +337,8 @@ int main() {
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
       I64 time = -rdtscp();
-      char *p = strstr(haystack, needle);
-      correct_ans = p ? p - haystack : -1;
-      volatile char *sink = p; (void)sink;
+      correct_ans = wrapped_strstr(haystack, needle);
+      volatile ptrdiff_t sink = correct_ans; (void)sink;
       time += rdtscp();
       best = best < time ? best : time;
     }
