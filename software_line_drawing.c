@@ -419,8 +419,8 @@ static int line_float_simd_horiz(Arena *a, int x1, int y1, int x2, int y2, int *
 
   int count = dx + 1;
   int padded_count = ((count + 7) / 8) * 8;
-  *xs = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
-  *ys = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+  *xs = (int *)arena_alloc(a, sizeof(int), 8, padded_count);
+  *ys = (int *)arena_alloc(a, sizeof(int), 8, padded_count);
 
   __m256i dx_vec = step_vec;
   for (int i = 0; i < count; i += 8) {
@@ -460,8 +460,8 @@ static int line_float_simd_vert(Arena *a, int x1, int y1, int x2, int y2, int **
 
   int count = dy + 1;
   int padded_count = ((count + 7) / 8) * 8;
-  *xs = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
-  *ys = (int *)arena_alloc(a, sizeof(int), 32, padded_count);
+  *xs = (int *)arena_alloc(a, sizeof(int), 8, padded_count);
+  *ys = (int *)arena_alloc(a, sizeof(int), 8, padded_count);
 
   __m256i dy_vec = step_vec;
   for (int i = 0; i < count; i += 8) {
