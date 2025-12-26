@@ -296,8 +296,8 @@ static void check_correctness() {
         }
 
         ptrdiff_t actual = strstr_wrapped(haystack, needle);
-        ptrdiff_t got = search_avx2(haystack, strlen(haystack),
-                                    needle, strlen(needle));
+        ptrdiff_t got    = search_avx2(haystack, strlen(haystack),
+                                       needle, strlen(needle));
         if (got != actual) {
           printf("ERROR: Expected %ld but got %ld for:\nhaystack: %s\nneedle: %s\n",
                  actual, got, haystack, needle);
@@ -324,7 +324,7 @@ int main() {
     printf("Needle length = %d\n", needle_len);
     fill(needle, needle_len, (uint64_t)&rng + 5);
     needle[needle_len] = '\0';
-    int64_t best;
+    int64_t best, baseline;
     intptr_t correct_ans;
 
     best = -1u>>1;
@@ -334,6 +334,7 @@ int main() {
       volatile ptrdiff_t sink = correct_ans; (void)sink;
       time += rdtscp();
       best = best < time ? best : time;
+      baseline = best;
     }
     printf("%-8s%3ld%10ld\n", "glibc", needle_len, best);
 
@@ -345,7 +346,7 @@ int main() {
       time += rdtscp();
       best = best < time ? best : time;
     }
-    printf("%-8s%3ld%10ld\n", "musl", needle_len, best);
+    printf("%-8s%3ld%10ld%10.2fx\n", "musl", needle_len, best, (double)baseline/(double)best);
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
@@ -355,7 +356,7 @@ int main() {
       time += rdtscp();
       best = best < time ? best : time;
     }
-    printf("%-8s%3ld%10ld\n", "rabin", needle_len, best);
+    printf("%-8s%3ld%10ld%10.2fx\n", "rabin", needle_len, best, (double)baseline/(double)best);
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
@@ -365,7 +366,7 @@ int main() {
       time += rdtscp();
       best = best < time ? best : time;
     }
-    printf("%-8s%3ld%10ld\n", "avx", needle_len, best);
+    printf("%-8s%3ld%10ld%10.2fx\n", "avx", needle_len, best, (double)baseline/(double)best);
 
     tassert(search_rabin_karp(haystack, countof(haystack), needle, needle_len) == correct_ans);
     tassert(search_avx2      (haystack, countof(haystack), needle, needle_len) == correct_ans);
