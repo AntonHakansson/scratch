@@ -1,28 +1,22 @@
 #if IN_SHELL /* $ bash substring_search.c
  # cc substring_search.c -o substring_search -fsanitize=undefined -g3 -Wall -Wextra -Wconversion -Wno-sign-conversion -march=native $@
-  cc substring_search.c -o substring_search -Os -march=native $@
+ cc substring_search.c -o substring_search -O3 -march=native $@
 exit # */
 #endif
 
 #define tassert(c)         while (!(c)) __builtin_trap()
-#define countof(a)         (Iz)(sizeof(a) / sizeof(*(a)))
+#define countof(a)         (intptr_t)(sizeof(a) / sizeof(*(a)))
 #define memset(d, c, sz)   __builtin_memset(d, c, sz)
 #define memcmp(s1, s2, sz) __builtin_memcmp(s1, s2, sz)
 
 #include <stdint.h>
 #include <stddef.h>
-typedef unsigned char U8;
-typedef uint64_t      U64;
-typedef int64_t       I64;
-typedef intptr_t      Iz;
-typedef uintptr_t     Uz;
-
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Rabin Karp
 
 ptrdiff_t search_rabin_karp(const char *haystack, size_t haystack_len,
-                                  const char *needle,   size_t needle_len) {
+                            const char *needle,   size_t needle_len) {
   if (needle_len == 0) { return 0; }
   if (haystack_len == 0) { return -1; }
   if (needle_len > haystack_len) { return -1; }
@@ -60,8 +54,8 @@ ptrdiff_t search_rabin_karp(const char *haystack, size_t haystack_len,
 }
 
 #include <immintrin.h>
-static ptrdiff_t search_rabin_karp_avx2(const char *haystack, size_t haystack_len,
-                                        const char *needle,   size_t needle_len) {
+static ptrdiff_t search_avx2(const char *haystack, size_t haystack_len,
+                             const char *needle,   size_t needle_len) {
   if (needle_len == 0) { return 0; }
   if (haystack_len == 0) { return -1; }
   if (needle_len > haystack_len) { return -1; }
@@ -254,24 +248,22 @@ char *musl_strstr(const char *h, const char *n)
 ////////////////////////////////////////////////////////////////////////////////
 //- Program
 
-static I64 rdtscp(void)
-{
-    Uz hi, lo;
+static int64_t rdtscp(void) {
+    uint64_t hi, lo;
     asm volatile ("rdtscp" : "=d"(hi), "=a"(lo) :: "cx", "memory");
-    return (I64)hi<<32 | lo;
+    return (int64_t)hi<<32 | lo;
 }
 
-static void fill(char *buffer, Iz len, U64 seed) {
-  U64 s = seed;
-  for (Iz i = 0; i < len; i++) {
+static void fill(char *buffer, intptr_t len, uint64_t seed) {
+  uint64_t s = seed;
+  for (intptr_t i = 0; i < len; i++) {
     s = s * 1111111111111111111u + 1;
     buffer[i] = 'A' + (char)(s >> 60);
     /* if (s & 1) buffer[i] |= 0x20; // to_lower */
   }
 }
 
-
-ptrdiff_t wrapped_strstr(const char *haystack, const char *needle) {
+ptrdiff_t strstr_wrapped(const char *haystack, const char *needle) {
   char *p = strstr(haystack, needle);
   return p ? p - haystack : -1;
 }
@@ -285,27 +277,27 @@ static void check_correctness() {
     max_needle_len = 33,
   };
 
-  U64 rng = 1;
+  uint64_t rng = 1;
   static char haystack[63];
 
-  for (Iz haystack_len = 1; haystack_len <= countof(haystack); haystack_len++) {
-    fill(haystack, haystack_len, (U64)&rng);
+  for (intptr_t haystack_len = 1; haystack_len <= countof(haystack); haystack_len++) {
+    fill(haystack, haystack_len, (uint64_t)&rng);
     haystack[haystack_len - 1] = '\0';
 
     static char needle[max_needle_len + 1] = {0};
-    for (Iz needle_len = 1; needle_len <= max_needle_len; needle_len++) {
-      for (Iz should_fill_needle_randomly = 0; should_fill_needle_randomly < 2; should_fill_needle_randomly++) {
+    for (intptr_t needle_len = 1; needle_len <= max_needle_len; needle_len++) {
+      for (intptr_t should_fill_needle_randomly = 0; should_fill_needle_randomly < 2; should_fill_needle_randomly++) {
         if (should_fill_needle_randomly) {
-          fill(needle, needle_len, (U64)&rng + 5);
+          fill(needle, needle_len, (uint64_t)&rng + 5);
           needle[needle_len] = '\0';
         } else {
           memcpy(needle, haystack + countof(haystack) - 1 - needle_len, needle_len);
           needle[needle_len] = '\0';
         }
 
-        ptrdiff_t actual = wrapped_strstr(haystack, needle);
-        ptrdiff_t got = search_rabin_karp_avx2(haystack, strlen(haystack),
-                                               needle, strlen(needle));
+        ptrdiff_t actual = strstr_wrapped(haystack, needle);
+        ptrdiff_t got = search_avx2(haystack, strlen(haystack),
+                                    needle, strlen(needle));
         if (got != actual) {
           printf("ERROR: Expected %ld but got %ld for:\nhaystack: %s\nneedle: %s\n",
                  actual, got, haystack, needle);
@@ -318,26 +310,27 @@ static void check_correctness() {
 int main() {
   check_correctness();
 
-  U64 rng = 1;
+  uint64_t rng = 1;
   static char haystack[1 << 25];
-  fill(haystack, countof(haystack), (U64)&rng);
+  fill(haystack, countof(haystack), (uint64_t)&rng);
 
   enum {
-    max_needle_len = 5,
+    max_needle_len = 10,
     bench_n_samples = 1<<6,
   };
 
   static char needle[max_needle_len + 1] = {0};
-  for (Iz needle_len = 2; needle_len <= max_needle_len; needle_len++) {
-    fill(needle, needle_len, (U64)&rng + 5);
+  for (intptr_t needle_len = 2; needle_len <= max_needle_len; needle_len++) {
+    printf("Needle length = %d\n", needle_len);
+    fill(needle, needle_len, (uint64_t)&rng + 5);
     needle[needle_len] = '\0';
-    I64 best;
-    Iz correct_ans;
+    int64_t best;
+    intptr_t correct_ans;
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
-      I64 time = -rdtscp();
-      correct_ans = wrapped_strstr(haystack, needle);
+      int64_t time = -rdtscp();
+      correct_ans = strstr_wrapped(haystack, needle);
       volatile ptrdiff_t sink = correct_ans; (void)sink;
       time += rdtscp();
       best = best < time ? best : time;
@@ -346,7 +339,7 @@ int main() {
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
-      I64 time = -rdtscp();
+      int64_t time = -rdtscp();
       char *p = musl_strstr(haystack, needle);
       volatile char *sink = p; (void)sink;
       time += rdtscp();
@@ -356,9 +349,9 @@ int main() {
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
-      I64 time = -rdtscp();
-      Iz got = search_rabin_karp(haystack, countof(haystack), needle, needle_len);
-      volatile Iz sink = got; (void)sink;
+      int64_t time = -rdtscp();
+      intptr_t got = search_rabin_karp(haystack, countof(haystack), needle, needle_len);
+      volatile intptr_t sink = got; (void)sink;
       time += rdtscp();
       best = best < time ? best : time;
     }
@@ -366,16 +359,16 @@ int main() {
 
     best = -1u>>1;
     for (int n = 0; n < bench_n_samples; n++) {
-      I64 time = -rdtscp();
-      Iz got = search_rabin_karp_avx2(haystack, countof(haystack), needle, needle_len);
-      volatile Iz sink = got; (void)sink;
+      int64_t time = -rdtscp();
+      intptr_t got = search_avx2(haystack, countof(haystack), needle, needle_len);
+      volatile intptr_t sink = got; (void)sink;
       time += rdtscp();
       best = best < time ? best : time;
     }
     printf("%-8s%3ld%10ld\n", "avx", needle_len, best);
 
     tassert(search_rabin_karp(haystack, countof(haystack), needle, needle_len) == correct_ans);
-    tassert(search_rabin_karp_avx2(haystack, countof(haystack), needle, needle_len) == correct_ans);
+    tassert(search_avx2      (haystack, countof(haystack), needle, needle_len) == correct_ans);
     if (correct_ans < 0) printf("String %s not found\n", needle);
   }
   
