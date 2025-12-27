@@ -1,0 +1,23 @@
+#+title: Billion Row Challange
+
+* Naive (single threaded, scalar) solution
+
+#+begin_example
+PROFILER REPORT
+===============
+total_s: 254.4257 s
+Data: 12.8479 GB
+throughtput: 0.0505 GB/s
+
+       entry_point_naive: 254425712.1397us (100.0%)	71489751.5481us ( 28.1%)
+              line parse: 125283842.1162us ( 49.2%)	64273168.1634us ( 25.3%)
+                     cut: 61010673.9527us ( 24.0%)	61010673.9527us ( 24.0%)
+       parse_temperature: 21863746.2465us (  8.6%)	21863746.2465us (  8.6%)
+                  upsert: 35778943.4726us ( 14.1%)	35778896.6169us ( 14.1%)
+              bst insert:   46.8557us (  0.0%)	  46.8557us (  0.0%)
+               bst_print: 9428.7562us (  0.0%)	9428.7562us (  0.0%)
+#+end_example
+
+* TODO Single threaded, SIMD solution
+
+* TODO Multi threaded, SIMD solution
