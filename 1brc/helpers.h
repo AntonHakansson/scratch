@@ -19,19 +19,28 @@ static Cut cut(S8 s, char sep) {
   return r;
 }
 
-static uint64_t s8hash(S8 s) {
-  uint64_t h = 1111111111111111111u;
-  for (int i = 0; i < s.len; i++) {
-    h ^= s.data[i];
-    h *= h;
+static uint64_t hash_fnv1a(void *buf, uintptr_t len) {
+  uint64_t hash = 0xcbf29ce484222325;
+  while (--len) {
+    hash ^= *(unsigned char*)buf;
+    hash *= 0x00000100000001b3;
+    buf++;
   }
-  h ^= h >> 32;
-  return h;
+  hash ^= hash >> 32;
+  return hash;
+}
+
+static uint64_t s8hash(S8 s) {
+  return hash_fnv1a(s.data, s.len);
 }
 
 static int s8cmp(S8 s1, S8 s2) {
   long min_len = s1.len < s2.len ? s1.len : s2.len;
   return strncmp((const char *)s1.data, (const char *)s2.data, min_len);
+}
+
+static _Bool s8eq(S8 s1, S8 s2) {
+  return (s1.len == s2.len) && memcmp(s1.data, s2.data, s1.len) == 0;
 }
 
 static intptr_t hash_table_idx_lookup(uintptr_t hash, intptr_t idx, uintptr_t exp) {

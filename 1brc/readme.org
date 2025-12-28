@@ -2,6 +2,8 @@
 
 * Naive (single threaded, scalar) solution
 
+- Majority of time (49.2%) spent extracting city name and temperature from line.
+
 #+begin_example
 PROFILER REPORT
 ===============
@@ -14,10 +16,24 @@ throughtput: 0.0505 GB/s
                      cut: 61010673.9527us ( 24.0%)	61010673.9527us ( 24.0%)
        parse_temperature: 21863746.2465us (  8.6%)	21863746.2465us (  8.6%)
                   upsert: 35778943.4726us ( 14.1%)	35778896.6169us ( 14.1%)
-              bst insert:   46.8557us (  0.0%)	  46.8557us (  0.0%)
-               bst_print: 9428.7562us (  0.0%)	9428.7562us (  0.0%)
 #+end_example
 
-* TODO Single threaded, SIMD solution
+* Single threaded, SIMD solution
+
+- 1.6x speedup compared to scalar version
+- Majority of time (43.9%) spent (presumably) page faulting
+
+#+begin_example
+PROFILER REPORT
+===============
+total_s: 156.3821 s
+Data: 12.8479 GB
+throughtput: 0.0822 GB/s
+
+        entry_point_simd: 156382058.6188us (100.0%)      68586256.9632us ( 43.9%)
+              line_parse: 36365111.8038us ( 23.3%)       36365111.8038us ( 23.3%)
+       parse_temperature: 20102002.5786us ( 12.9%)       20102002.5786us ( 12.9%)
+                  upsert: 31328687.2732us ( 20.0%)       31328687.2732us ( 20.0%)
+#+end_example
 
 * TODO Multi threaded, SIMD solution

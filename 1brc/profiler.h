@@ -24,8 +24,11 @@ static __thread struct {
 #define prof_zone_enter(name) prof_zone_enter_(name)
 #define prof_zone_exit()      prof_zone_exit_()
 #endif
+
+#define DEFER_LOOP(begin, end)        for(int _i_ = ((begin), 0); !_i_; _i_ += 1, (end))
 #define PROF_FUNCTION_BEGIN prof_zone_enter(__func__)
 #define PROF_FUNCTION_END   prof_zone_exit()
+#define PROFILE_BLOCK(name) DEFER_LOOP(prof_zone_enter(name), prof_zone_exit())
 
 static intptr_t prof_rdtscp(void);
 static Profile_Zone *prof_get_zone(const char *name);
