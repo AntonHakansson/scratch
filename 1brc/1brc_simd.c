@@ -19,6 +19,10 @@ exit # */
 
 #include <immintrin.h>
 
+static __thread struct {
+  uintptr_t lane_idx;
+} tctx = {0};
+
 #include "profiler.h"
 #include "helpers.h"
 
@@ -154,8 +158,7 @@ static void *entry_point_simd(void *arg) {
 
 int main() {
   int fd = open("measurements.txt", O_RDONLY);
-  /* int fd = open("1000.lines", O_RDONLY); */
-  if (fd < 0) { perror("openat"); abort(); }
+  if (fd < 0) { perror("open"); abort(); }
 
   struct stat stat;
   int ok = fstat(fd, &stat);

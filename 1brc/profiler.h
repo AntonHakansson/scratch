@@ -20,15 +20,16 @@ static __thread struct {
 #ifdef NPROFILER
 #define prof_zone_enter(name)
 #define prof_zone_exit()
+#define PROFILE_BLOCK(name)
 #else
 #define prof_zone_enter(name) prof_zone_enter_(name)
 #define prof_zone_exit()      prof_zone_exit_()
+#define PROFILE_BLOCK(name) DEFER_LOOP(prof_zone_enter(name), prof_zone_exit())
 #endif
 
 #define DEFER_LOOP(begin, end)        for(int _i_ = ((begin), 0); !_i_; _i_ += 1, (end))
 #define PROF_FUNCTION_BEGIN prof_zone_enter(__func__)
 #define PROF_FUNCTION_END   prof_zone_exit()
-#define PROFILE_BLOCK(name) DEFER_LOOP(prof_zone_enter(name), prof_zone_exit())
 
 static intptr_t prof_rdtscp(void);
 static Profile_Zone *prof_get_zone(const char *name);
@@ -89,7 +90,7 @@ static void __attribute__((unused)) prof_zone_exit_() {
     Profile_Zone* parent = prof_globals.zone_stack[prof_globals.zone_stack_count - 2];
     parent->child_time += elapsed_time;
   }
-  else /* When we pop root node, print report */ {
+  else if (tctx.lane_idx == 0) /* When we pop root node, print report */ {
     printf("\nPROFILER REPORT\n");
     printf("===============\n");
     double cpu_hz = prof_estimate_cpu_freq(100000000 /* 100ms */);

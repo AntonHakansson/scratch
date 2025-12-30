@@ -21,7 +21,6 @@ throughtput: 0.0505 GB/s
 * Single threaded, SIMD solution
 
 - 1.6x speedup compared to scalar version
-- Majority of time (43.9%) spent (presumably) page faulting
 
 #+begin_example
 PROFILER REPORT
@@ -36,4 +35,18 @@ throughtput: 0.0822 GB/s
                   upsert: 31328687.2732us ( 20.0%)       31328687.2732us ( 20.0%)
 #+end_example
 
-* TODO Multi threaded, SIMD solution
+* Multi threaded, SIMD solution
+
+- 12.8x speedup compared to single threaded, scalar version
+- 7.9x speedup compared to SIMD version
+
+#+begin_example
+total_s: 18.3352 s
+Data: 12.8479 GB
+throughtput: 0.7007 GB/s
+
+             entry_point: 18335198.9369us (100.0%)       8208914.8622us ( 44.8%) 
+              line_parse: 4489316.4556us ( 24.5%)        4489316.4556us ( 24.5%) 
+       parse_temperature: 1973260.8807us ( 10.8%)        1973260.8807us ( 10.8%) 
+                  upsert: 3663706.7384us ( 20.0%)        3663706.7384us ( 20.0%) 
+#+end_example

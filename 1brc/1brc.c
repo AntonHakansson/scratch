@@ -17,6 +17,10 @@ exit # */
 #include "sys/mman.h"
 #include "sys/stat.h"
 
+static __thread struct {
+  uintptr_t lane_idx;
+} tctx = {0};
+
 #include "profiler.h"
 #include "helpers.h"
 
@@ -161,12 +165,11 @@ static void *entry_point_naive(void *arg)
 
 int main() {
   int fd = open("measurements.txt", O_RDONLY);
-  /* int fd = open("1000.lines", O_RDONLY); */
-  if (fd < 0) { perror("openat: "); abort(); }
+  if (fd < 0) { perror("open"); abort(); }
 
   struct stat stat;
   int ok = fstat(fd, &stat);
-  if (ok < 0) { perror("fstat: "); abort(); }
+  if (ok < 0) { perror("fstat"); abort(); }
 
   input.beg = (unsigned char *)mmap(0, stat.st_size, PROT_READ, MAP_PRIVATE | MAP_POPULATE | MAP_HUGE_2GB, fd, 0);
   input.end = input.beg + stat.st_size;

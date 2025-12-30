@@ -1,7 +1,7 @@
 typedef struct S8  { unsigned char *data; intptr_t len; } S8;
 typedef struct Cut { S8 head; S8 tail; } Cut;
 
-static Cut cut(S8 s, char sep) {
+static Cut __attribute__((unused)) cut(S8 s, char sep) {
   PROF_FUNCTION_BEGIN;
   Cut r = {0};
   if (s.len) {
@@ -21,7 +21,7 @@ static Cut cut(S8 s, char sep) {
 
 static uint64_t hash_fnv1a(void *buf, uintptr_t len) {
   uint64_t hash = 0xcbf29ce484222325;
-  while (--len) {
+  while (len--) {
     hash ^= *(unsigned char*)buf;
     hash *= 0x00000100000001b3;
     buf++;
@@ -36,7 +36,11 @@ static uint64_t s8hash(S8 s) {
 
 static int s8cmp(S8 s1, S8 s2) {
   long min_len = s1.len < s2.len ? s1.len : s2.len;
-  return strncmp((const char *)s1.data, (const char *)s2.data, min_len);
+  int cmp = strncmp((const char *)s1.data, (const char *)s2.data, min_len);
+  if (cmp != 0) return cmp;
+  if (s1.len < s2.len) return -1;
+  if (s1.len > s2.len) return 1;
+  return 0;
 }
 
 static _Bool s8eq(S8 s1, S8 s2) {
