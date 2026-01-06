@@ -39,7 +39,7 @@ static double prof_estimate_cpu_freq(intptr_t time_to_measure_ns);
 
 static intptr_t prof_rdtscp(void) {
   uintptr_t hi, lo;
-  asm volatile ("rdtscp" : "=d"(hi), "=a"(lo) :: "cx", "memory");
+  __asm volatile ("rdtscp" : "=d"(hi), "=a"(lo) :: "cx", "memory");
   return (intptr_t)hi<<32 | lo;
 }
 
@@ -96,18 +96,18 @@ static void __attribute__((unused)) prof_zone_exit_() {
     double cpu_hz = prof_estimate_cpu_freq(100000000 /* 100ms */);
     double total_s = (zone->inclusive_time / cpu_hz);
     double total_us = total_s * 1e6;
-    printf("total_s: %.4f s\n", total_s);
+    printf("Total: %.4f s\n", total_s);
     if (prof_globals.throughput_data_sz) {
       double gb = (double)prof_globals.throughput_data_sz / (double)(1024 * 1024 * 1024);
-      printf("Data: %.4f GB\n", gb);
-      printf("throughtput: %.4f GB/s\n", gb/total_s);
+      printf("Data size: %.4f GB\n", gb);
+      printf("Throughtput: %.4f GB/s\n", gb/total_s);
     }
 
     for (intptr_t zone_idx = 0; zone_idx < prof_globals.zones_count; zone_idx++) {
       Profile_Zone *zone = &prof_globals.zones[zone_idx];
       double inclusive_time = (double)zone->inclusive_time/cpu_hz * 1e6;
       double exclusive_time = (double)((zone->inclusive_time - zone->child_time) / cpu_hz) * 1e6;
-      printf("%24s: %9.4fus (%5.1f%%)\t %9.4fus (%5.1f%%) \n",
+      printf("%24s: %11.2fus (%5.1f%%)\t %11.2fus (%5.1f%%) \n",
              zone->name,
              inclusive_time, (inclusive_time / total_us) * 100.0,
              exclusive_time, (exclusive_time / total_us) * 100.0);

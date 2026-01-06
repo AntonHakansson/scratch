@@ -1,3 +1,5 @@
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+
 typedef struct S8  { unsigned char *data; intptr_t len; } S8;
 typedef struct Cut { S8 head; S8 tail; } Cut;
 
@@ -19,7 +21,7 @@ static Cut __attribute__((unused)) cut(S8 s, char sep) {
   return r;
 }
 
-static uint64_t hash_fnv1a(void *buf, uintptr_t len) {
+static uint64_t hash_fnv1a(unsigned char *buf, uintptr_t len) {
   uint64_t hash = 0xcbf29ce484222325;
   while (len--) {
     hash ^= *(unsigned char*)buf;
@@ -31,7 +33,10 @@ static uint64_t hash_fnv1a(void *buf, uintptr_t len) {
 }
 
 static uint64_t s8hash(S8 s) {
-  return hash_fnv1a(s.data, s.len);
+  PROF_FUNCTION_BEGIN;
+  uint64_t h = hash_fnv1a(s.data, s.len);
+  PROF_FUNCTION_END;
+  return h;
 }
 
 static int s8cmp(S8 s1, S8 s2) {
@@ -48,7 +53,7 @@ static _Bool s8eq(S8 s1, S8 s2) {
 }
 
 static intptr_t hash_table_idx_lookup(uintptr_t hash, intptr_t idx, uintptr_t exp) {
-  uintptr_t mask = (1ull << exp) - 1;
-  uintptr_t step = (hash >> (sizeof(hash)*8ull - exp)) | 1;
+  uintptr_t mask = (1u << exp) - 1;
+  uintptr_t step = (hash >> (sizeof(hash)*8 - exp)) | 1;
   return (idx + step) & mask;
 }

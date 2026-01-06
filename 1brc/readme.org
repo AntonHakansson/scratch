@@ -1,5 +1,18 @@
 #+title: Billion Row Challange
 
+I have not tested for correctness as this is more of a personal experiment in optimization using multithreading + SIMD.
+
+The profiler report is not representative of actual throughput due to profiling overhead.
+
+Throughput of =1brc_multicore.c= after clearing filesystem cache:
+
+#+begin_example
+Threads: 12
+File size: 13156.26 MB
+Time: 5.044 seconds
+Throughput: 2.55 GB/s
+#+end_example
+
 * Naive (single threaded, scalar) solution
 
 - Majority of time (49.2%) spent extracting city name and temperature from line.
@@ -41,12 +54,14 @@ throughtput: 0.0822 GB/s
 - 7.9x speedup compared to SIMD version
 
 #+begin_example
-total_s: 18.3352 s
+PROFILER REPORT
+===============
+total_s: 14.8566 s
 Data: 12.8479 GB
-throughtput: 0.7007 GB/s
+throughtput: 0.8648 GB/s
 
-             entry_point: 18335198.9369us (100.0%)       8208914.8622us ( 44.8%) 
-              line_parse: 4489316.4556us ( 24.5%)        4489316.4556us ( 24.5%) 
-       parse_temperature: 1973260.8807us ( 10.8%)        1973260.8807us ( 10.8%) 
-                  upsert: 3663706.7384us ( 20.0%)        3663706.7384us ( 20.0%) 
+             entry_point: 14856626.2496us (100.0%)       5677432.2196us ( 38.2%)
+              line_parse: 3325135.9025us ( 22.4%)        3325135.9025us ( 22.4%)
+              parse_temp: 1965695.2634us ( 13.2%)        1965695.2634us ( 13.2%)
+                  upsert: 3888362.8641us ( 26.2%)        3888362.8641us ( 26.2%)
 #+end_example
