@@ -1,5 +1,5 @@
 #if IN_SHELL /* $ bash wayland_over_the_wire.c
- cc wayland_over_the_wire.c -o wayland_over_the_wire -fsanitize=undefined,address -Wall -Wextra -g3 -O3 -march=native -ffast-math
+ cc wayland_over_the_wire.c -o wayland_over_the_wire -fsanitize=address,undefined -Wall -Wextra -g3 -O0 -march=native -lm
 exit # */
 #endif
 
@@ -8,7 +8,7 @@ exit # */
   ======================
 
   A program to learn how Wayland protocol works under the hood without third-party dependencies.
-  Modestly opens a douple-buffered, resizable window and mandelbrot :s
+  Modestly opens a douple-buffered, resizable window and draws stuff :s
 
  */
 
@@ -17,46 +17,53 @@ exit # */
 #include <stdlib.h>
 
 #define tassert(c)       while (!(c)) __builtin_trap()
-#define breakpoint(c)    ((c) ? ({ asm volatile ("int3; nop"); }) : 0)
 #define countof(a)       (ptrdiff_t)(sizeof(a) / sizeof(*(a)))
-#define new(a, t, n)     ((t *)arena_alloc(a, sizeof(t), _Alignof(t), (n)))
-#define newbeg(a, t, n)  ((t *)arena_alloc_beg(a, sizeof(t), _Alignof(t), (n)))
+#define arena_alloc(a, t, n)     ((t *)arena_alloc_end_ext(a, sizeof(t), _Alignof(t), (n)))
+#define arena_alloc_beg(a, t, n) ((t *)arena_alloc_beg_ext(a, sizeof(t), _Alignof(t), (n)))
 #define s8(s)            (S8){(uint8_t *)s, countof(s)-1}
+#define s8pri(s)         (int)(s).len, (s).data
 #define memcpy(d, s, n)  __builtin_memcpy(d, s, n)
 #define memset(d, c, n)  __builtin_memset(d, c, n)
 
-////////////////////////////////////////////////////////////////////////////////
-//- Arena
+typedef struct { uint8_t *beg;  uint8_t  *end; } Arena;
+typedef struct { uint8_t *data; ptrdiff_t len; } S8;
 
-typedef struct { uint8_t *beg; uint8_t *end; } Arena;
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#else
+#define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
 
-static uint8_t *arena_alloc(Arena *a, ptrdiff_t objsize, ptrdiff_t align, ptrdiff_t count) {
-  ptrdiff_t padding = (size_t)a->end & (align - 1);
-  tassert((count <= (a->end - a->beg - padding) / objsize) && "out of memory");
-  ptrdiff_t total = objsize * count;
-  return memset(a->end -= total + padding, 0, total);
+static Arena arena_make(uint8_t *beg, ptrdiff_t nbyte) {
+  ASAN_POISON_MEMORY_REGION(beg, nbyte);
+  return (Arena){ beg, beg + nbyte };
 }
 
-static uint8_t *arena_alloc_beg(Arena *a, ptrdiff_t objsize, ptrdiff_t align, ptrdiff_t count) {
-  ptrdiff_t padding = -(size_t)(a->beg) & (align - 1);
-  ptrdiff_t total   = padding + objsize * count;
-  tassert(total < (a->end - a->beg) && "out of memory");
-  uint8_t *p = a->beg + padding;
+static uint8_t *arena_alloc_end_ext(Arena *a, ptrdiff_t objsize, ptrdiff_t align, ptrdiff_t count) {
+  ptrdiff_t padding = (size_t)(a->end) & (align - 1);
+  tassert((count <= (a->end - a->beg - padding) / objsize) && "out of memory");
+  uint8_t *p = a->end - objsize*count - padding;
+  ASAN_UNPOISON_MEMORY_REGION(p, objsize*count);
   memset(p, 0, objsize * count);
-  a->beg += total;
+  return a->end = p;
+}
+
+static uint8_t *arena_alloc_beg_ext(Arena *a, ptrdiff_t objsize, ptrdiff_t align, ptrdiff_t count) {
+  ptrdiff_t padding = -(size_t)(a->beg) & (align - 1);
+  tassert((count <= (a->end - a->beg - padding) / objsize) && "out of memory");
+  uint8_t *p = a->beg + padding;
+  ASAN_UNPOISON_MEMORY_REGION(p, objsize*count);
+  memset(p, 0, objsize*count);
+  a->beg = p + objsize*count;
   return p;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//- String
-
-#define s8pri(s) (int)s.len, s.data
-
-typedef struct { uint8_t *data; ptrdiff_t len; } S8;
-
 static S8 s8dup(Arena *a, S8 s) {
   return (S8) {
-    memcpy((new(a, uint8_t, s.len)), s.data, s.len * sizeof(uint8_t)),
+    memcpy((arena_alloc(a, uint8_t, s.len)), s.data, s.len * sizeof(uint8_t)),
     s.len,
   };
 }
@@ -71,14 +78,16 @@ static S8 s8cstr(Arena *a, char *cstr) {
 static S8 s8concatv(Arena *a, S8 head, S8 *ss, ptrdiff_t count) {
   S8 r = {0};
   if (!head.data || (uint8_t *)(head.data+head.len) != a->beg) {
-    S8 copy = head;
-    copy.data = newbeg(a, uint8_t, head.len);
+    S8 copy = {
+      .data = arena_alloc_beg(a, uint8_t, head.len),
+      .len = head.len,
+    };
     if (head.len) memcpy(copy.data, head.data, head.len);
     head = copy;
   }
   for (ptrdiff_t i = 0; i < count; i++) {
     S8 tail = ss[i];
-    uint8_t *data = newbeg(a, uint8_t, tail.len);
+    uint8_t *data = arena_alloc_beg(a, uint8_t, tail.len);
     if (tail.len) memcpy(data, tail.data, tail.len);
     head.len += tail.len;
   }
@@ -108,7 +117,7 @@ static S8 s8i64(Arena *arena, int64_t x) {
     digits[--i] = (char)(x % 10) + '0';
   } while (x /= 10);
   ptrdiff_t len = countof(digits) - i + negative;
-  uint8_t *beg = new(arena, uint8_t, len);
+  uint8_t *beg = arena_alloc(arena, uint8_t, len);
   uint8_t *end = beg;
   if (negative) { *end++ = '-'; }
   do { *end++ = digits[i++]; } while (i < countof(digits));
@@ -118,15 +127,9 @@ static S8 s8i64(Arena *arena, int64_t x) {
 ////////////////////////////////////////////////////////////////////////////////
 //- Error list
 
-typedef enum Error_Severity {
-  Error_Severity_None,
-  Error_Severity_Error,
-} Error_Severity;
-
 typedef struct Err Err;
 struct Err {
   Err *next;
-  Error_Severity severity;
   S8 message;
 };
 
@@ -135,70 +138,222 @@ typedef struct ErrList {
   Arena rewind_arena;
   Arena scratch;
   Err *first;
-  Error_Severity max_severity;
 } ErrList;
 
-static Err *emit_err(ErrList *errors, Error_Severity severity, S8 message);
+static ErrList *errors_make(Arena *arena, ptrdiff_t nbyte);
+static int  errors_get_health_and_reset(ErrList *errors);
+static Err *errors_emit_nondup(ErrList *errors, S8 message);
+static Err *errors_emit(ErrList *errors, S8 message);
 
 static ErrList *errors_make(Arena *arena, ptrdiff_t nbyte) {
-  ErrList *r = new(arena, ErrList, 1);
-  uint8_t *beg = new(arena, uint8_t, nbyte);
-  r->arena = (Arena){beg, beg + nbyte};
-  ptrdiff_t scratch_nbyte = 2048;
-  uint8_t *scratch_beg = new(&r->arena, uint8_t, scratch_nbyte);
-  r->scratch = (Arena){scratch_beg, scratch_beg + scratch_nbyte};
-  r->rewind_arena = r->arena;
+  ErrList *r = arena_alloc(arena, ErrList, 1);
+
+  uint8_t *errors_beg = arena_alloc(arena, uint8_t, nbyte);
+  Arena error_arena = arena_make(errors_beg, nbyte);
+
+  ptrdiff_t scratch_nbyte = nbyte >> 1;
+  uint8_t *scratch_beg = arena_alloc(&error_arena, uint8_t, scratch_nbyte);
+
+  *r = (ErrList){
+    .arena = error_arena,
+    .rewind_arena = error_arena,
+    .scratch = arena_make(scratch_beg, scratch_nbyte),
+    .first = 0,
+  };
+
+  ASAN_POISON_MEMORY_REGION(&r->scratch, sizeof(r->scratch));
+
   return r;
 }
 
-static Error_Severity errors_get_max_severity_and_reset(ErrList *errors) {
-  Error_Severity max_severity = errors->max_severity;
+static int errors_get_health_and_reset(ErrList *errors) {
+  int result = !!errors->first;
   errors->first = 0;
-  errors->max_severity = Error_Severity_None;
   errors->arena = errors->rewind_arena;
-  return max_severity;
+  return result;
 }
 
-#define for_errors(errors, varname)                                            \
-    for (Err *varname = errors->first; varname && (errors->max_severity > 0);  \
-         varname = varname->next)
-
-
-static Err *emit_err_nondup(ErrList *errors, Error_Severity severity, S8 message) {
+static Err *errors_emit_nondup(ErrList *errors, S8 message) {
   tassert(errors && errors->arena.beg);
-  tassert(message.data >= errors->arena.beg && message.data < errors->arena.end);
+  tassert(message.data >= errors->rewind_arena.beg && message.data + message.len <= errors->rewind_arena.end);
 
   _Bool arena_exhausted = (errors->arena.end - errors->arena.beg) < ((ptrdiff_t)sizeof(Err) + message.len);
   if (arena_exhausted) {
-    // REVIEW: force flush existing errors to stderr instead?
-    errors_get_max_severity_and_reset(errors);
-    emit_err(errors, Error_Severity_Error, s8("Exceeded error memory limit. Previous errors omitted."));
+    (void)errors_get_health_and_reset(errors);
+    errors_emit(errors, s8("Exceeded error memory limit. Previous errors omitted."));
   }
-  Err *err = new(&errors->arena, Err, 1);
-  err->severity = severity;
+  Err *err = arena_alloc(&errors->arena, Err, 1);
   err->message = message;
   err->next = errors->first;
   errors->first = err;
-  if (severity > errors->max_severity) {
-    errors->max_severity = severity;
-  }
   return err;
 }
 
-static Err *emit_err(ErrList *errors, Error_Severity severity, S8 message) {
+static Err *errors_emit(ErrList *errors, S8 message) {
   tassert(errors && errors->arena.beg);
-  return emit_err_nondup(errors, severity, s8dup(&errors->arena, message));
+  return errors_emit_nondup(errors, s8dup(&errors->arena, message));
 }
 
-#define emit_errno(errors, ...)                                                \
+#define errors_emit_errno(errors, ...)                                         \
   do {                                                                         \
     Arena scratch = errors->scratch;                                           \
     S8 msg = s8concat(&scratch, s8(__FILE_NAME__),                             \
                    s8("("), s8i64(&scratch, __LINE__), s8("): "),              \
                    __VA_ARGS__, s8(": "),                                      \
                    s8cstr(&scratch, strerror(errno)));                         \
-    emit_err(errors, Error_Severity_Error, msg);                               \
+    errors_emit(errors, msg);                                                  \
   } while (0);
+
+#define errors_for(errors, varname)              \
+    for (Err *varname = errors->first; varname;  \
+         varname = varname->next)
+
+
+////////////////////////////////////////////////////////////////////////////////
+//- Drawing
+
+#include <immintrin.h>
+
+static int line_float_simd_horiz(Arena *a, int x0, int y0, int x1, int y1, int **xs, int **ys) {
+  _Bool swap = x1 - x0 < 0;
+  if (swap) {
+    int tx = x0, ty = y0;
+    x0 = x1; y0 = y1;
+    x1 = tx; y1 = ty;
+  }
+  int dx = x1 - x0;
+  int dy = y1 - y0;
+
+  if (abs(dy) > abs(dx)) return 0;
+
+  __m256 y0_vec = _mm256_set1_ps(y0);
+  __m256i x0_vec = _mm256_set1_epi32(x0);
+  __m256 slope_vec = _mm256_set1_ps((float)dy / (float)dx);
+  __m256i step_vec = _mm256_setr_epi32(0,1,2,3,4,5,6,7);
+
+  int count = dx + 1;
+  int padded_count = ((count + 7) / 8) * 8;
+  *xs = (int *)arena_alloc_end_ext(a, sizeof(int), 8, padded_count);
+  *ys = (int *)arena_alloc_end_ext(a, sizeof(int), 8, padded_count);
+
+  __m256i dx_vec = step_vec;
+  for (int i = 0; i < count; i += 8) {
+    // Current x values: x0 + i, x0 + i+1, ...
+    __m256i x_vec = _mm256_add_epi32(x0_vec, dx_vec);
+
+    // Calculate y = y0 + slope * (x - x0)
+    __m256 y_ps_vec = _mm256_fmadd_ps(slope_vec, _mm256_cvtepi32_ps(dx_vec), y0_vec);
+    __m256i y_vec = _mm256_cvtps_epi32(y_ps_vec);
+
+    // Store results
+    _mm256_storeu_si256((__m256i *)&(*xs)[i], x_vec);
+    _mm256_storeu_si256((__m256i *)&(*ys)[i], y_vec);
+
+    dx_vec = _mm256_add_epi32(dx_vec, _mm256_set1_epi32(8));
+  }
+
+  return count;
+}
+
+static int line_float_simd_vert(Arena *a, int x0, int y0, int x1, int y1, int **xs, int **ys) {
+  _Bool do_swap = y1 - y0 < 0;
+  if (do_swap) {
+    int tx = x0, ty = y0;
+    x0 = x1; y0 = y1;
+    x1 = tx; y1 = ty;
+  }
+  int dx = x1 - x0;
+  int dy = y1 - y0;
+
+  if (abs(dx) > abs(dy)) return 0;
+
+  __m256  x0_vec = _mm256_set1_ps(x0);
+  __m256i y0_vec = _mm256_set1_epi32(y0);
+  __m256 slope_vec = _mm256_set1_ps((float)dx / (float)dy);
+  __m256i step_vec = _mm256_setr_epi32(0,1,2,3,4,5,6,7);
+
+  int count = dy + 1;
+  int padded_count = ((count + 7) / 8) * 8;
+  *xs = (int *)arena_alloc_end_ext(a, sizeof(int), 8, padded_count);
+  *ys = (int *)arena_alloc_end_ext(a, sizeof(int), 8, padded_count);
+
+  __m256i dy_vec = step_vec;
+  for (int i = 0; i < count; i += 8) {
+    // Current y values: y0 + i, y0 + i+1, ...
+    __m256i y_vec = _mm256_add_epi32(y0_vec, dy_vec);
+
+    // Calculate x = x0 + slope * (y - y0)
+    __m256 x_ps_vec = _mm256_fmadd_ps(slope_vec, _mm256_cvtepi32_ps(dy_vec), x0_vec);
+    __m256i x_vec = _mm256_cvtps_epi32(x_ps_vec);
+
+    // Store results
+    _mm256_storeu_si256((__m256i *)&(*xs)[i], x_vec);
+    _mm256_storeu_si256((__m256i *)&(*ys)[i], y_vec);
+
+    dy_vec = _mm256_add_epi32(dy_vec, _mm256_set1_epi32(8));
+  }
+
+  return count;
+}
+
+__attribute__((optimize("O3")))
+static int line_float_simd(Arena *a, int x1, int y1, int x2, int y2, int **xs, int **ys) {
+  int dx = x2 - x1;
+  int dy = y2 - y1;
+  if (abs(dy) > abs(dx)) {
+    return line_float_simd_vert(a, x1, y1, x2, y2, xs, ys);
+  } else {
+    return line_float_simd_horiz(a, x1, y1, x2, y2, xs, ys);
+  }
+}
+
+__attribute__((optimize("O3")))
+static void draw_line(Arena scratch, uint32_t *pixels, uint32_t width, uint32_t height, int x1, int y1, int x2, int y2, uint32_t color) {
+  int *xs, *ys;
+  int count = line_float_simd(&scratch, x1, y1, x2, y2, &xs, &ys);
+  for (int i = 0; i < count; i++) {
+    uint32_t idx = ys[i] * width + xs[i];
+    if (idx > width * height) continue;
+    pixels[idx] = color;
+  }
+}
+
+__attribute__((optimize("O3")))
+static void draw_checkerboard(uint32_t *pixels, uint32_t width, uint32_t height, uint32_t color1, uint32_t color2, int square_size) {
+  for (uint32_t y = 0; y < height; y++) {
+    for (uint32_t x = 0; x < width; x++) {
+      if (((x / square_size) % 2) == ((y / square_size) % 2)) {
+        pixels[y * width + x] = 0xFF000000 | color1;
+      } else {
+        pixels[y * width + x] = 0xFF000000 | color2;
+      }
+    }
+  }
+}
+
+__attribute__((optimize("O3")))
+static void draw_lissajous_curve(Arena scratch, uint32_t *pixels, uint32_t width, uint32_t height, uint32_t color, float phase) {
+  int num_points = 500;
+  float a = 3.0f; // Frequency in x
+  float b = 2.0f; // Frequency in y
+  float delta = phase; // Phase offset
+  uint32_t center_x = width / 2;
+  uint32_t center_y = height / 2;
+  float scale = width / 3;
+
+  for (int i = 0; i < num_points; i++) {
+    float t1 = i * 2.0f * 3.14159f / num_points;
+    float t2 = (i + 1) * 2.0f * 3.14159f / num_points;
+
+    uint32_t x1 = center_x + __builtin_cos(a * t1 + delta) * scale;
+    uint32_t y1 = center_y + __builtin_sin(b * t1 + delta) * scale;
+
+    uint32_t x2 = center_x + __builtin_cos(a * t2 + delta) * scale;
+    uint32_t y2 = center_y + __builtin_sin(b * t2 + delta) * scale;
+
+    draw_line(scratch, pixels, width, height, x1, y1, x2, y2, color);
+  }
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -218,26 +373,26 @@ static uint32_t *write_u32(char **at, uint32_t v) {
   return r;
 }
 
-static char *write_s8_lit_and_align(char **at, S8 lit) {
-  tassert(lit.data[lit.len] == 0); // null terminated!
-  uint32_t s_len = lit.len + 1;    // include null terminator in length
-  write_u32(at, s_len);
-  char *r = *at;
-  memcpy(r, lit.data, lit.len);
-  r[s_len - 1] = 0;
-  *at += s_len;
-  size_t padding = -(size_t)(*at) & (_Alignof(uint32_t) - 1);
-  *at += padding;
-  return r;
-}
-
 static uint32_t read_u32(char **at) {
   uint32_t r = *(uint32_t *)(*at);
   *at += 4;
   return r;
 }
 
-static S8 read_s8_and_align(char **at) {
+static size_t wl_wire_s8_and_align_sz(S8 str) {
+  size_t padding = -(size_t)(str.len + 1) & (_Alignof(uint32_t) - 1);
+  return 4 + str.len + 1 + padding;
+}
+
+static void wl_wire_write_s8_and_align(char **at, S8 str) {
+  char *end = *at + wl_wire_s8_and_align_sz(str);
+  write_u32(at, str.len + 1); // length includes null-terminator
+  memcpy(*at, str.data, str.len);
+  (*at)[str.len] = 0; // insert null-terminator
+  *at = end;
+}
+
+static S8 wl_wire_read_s8_and_align(char **at) {
   uint32_t len = read_u32(at);
   char *cstr = *at;
   *at += len;
@@ -245,6 +400,8 @@ static S8 read_s8_and_align(char **at) {
   *at += padding;
   return (S8){(uint8_t *)cstr, len > 0 ? len - 1 : 0};
 }
+
+//- Wayland Protocol
 
 enum { MAX_WAYLAND_BUFFER_SIZE = sizeof(int) * 32, };
 
@@ -279,9 +436,7 @@ static int wl_display_sync(char *buffer, int buffer_sz, int display, int callbac
 }
 
 static int wl_registry_bind(char *buffer, int buffer_sz, int registry, uint32_t name, S8 thing, uint32_t required_version, uint32_t bind_id) {
-  ptrdiff_t string_size = 4 + thing.len + 1; // length + string + null
-  string_size += (-(string_size) & 3); // align to 4 bytes
-  ptrdiff_t message_sz = 4 + 2 + 2 + 4 + string_size + 4 + 4;
+  ptrdiff_t message_sz = 4 + 2 + 2 + 4 + wl_wire_s8_and_align_sz(thing) + 4 + 4;
   tassert(message_sz <= buffer_sz);
 
   enum { WL_REGISTRY_REQUEST_BIND = 0, };
@@ -290,7 +445,7 @@ static int wl_registry_bind(char *buffer, int buffer_sz, int registry, uint32_t 
   write_u16(&at, WL_REGISTRY_REQUEST_BIND);
   write_u16(&at, message_sz);
   write_u32(&at, name);
-  write_s8_lit_and_align(&at, thing);
+  wl_wire_write_s8_and_align(&at, thing);
   write_u32(&at, required_version);
   write_u32(&at, bind_id);
 
@@ -460,53 +615,20 @@ static int wl_xdg_surface_ack_configure(char *buffer, int buffer_sz, int xdg_sur
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//- Drawing
-
-static void draw_mandelbrot(uint32_t *pixels, uint32_t width, uint32_t height, float zoom, float cx, float cy) {
-  for (uint32_t py = 0; py < height; py++) {
-    for (uint32_t px = 0; px < width; px++) {
-      float x0 = (px - width/2.0)  / zoom + cx;
-      float y0 = (py - height/2.0) / zoom + cy;
-
-      float x = 0, y = 0;
-      int iter = 0;
-      while (x*x + y*y <= 4 && iter < 256) {
-        float xtemp = x*x - y*y + x0;
-        y = 2*x*y + y0;
-        x = xtemp;
-        iter++;
-      }
-
-      uint8_t r = (uint8_t)(iter * 3 % 256);
-      uint8_t g = (uint8_t)(iter * 5 % 256);
-      uint8_t b = (uint8_t)(iter * 7 % 256);
-      uint32_t color = (r << 16) | (g << 8) | b;
-      pixels[py * width + px] = 0xFF000000 | color;
-    }
-  }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
 //- Program
 
 #include <errno.h>
 #include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 
-#include <unistd.h>
+#include <unistd.h>      // syscall, write, read, close
 #include <sys/syscall.h> // SYS_memfd_create
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/un.h>
+#include <sys/socket.h> // socket, connect, etc.
+#include <sys/un.h> // sockaddr_un
 #include <poll.h>
 
 #include <sys/mman.h> // shm_open
 #include <fcntl.h>
-
-#include <time.h>
-#include <math.h>
 
 static _Bool socket_send_request(int fd, char *buffer, ptrdiff_t len, ErrList *errors) {
   ptrdiff_t total_written = 0;
@@ -514,7 +636,7 @@ static _Bool socket_send_request(int fd, char *buffer, ptrdiff_t len, ErrList *e
   while (total_written < len) {
     ptrdiff_t nbytes_written = write(fd, buffer + total_written, len - total_written);
     if (nbytes_written < 0) {
-      emit_errno(errors, s8("write"));
+      errors_emit_errno(errors, s8("write"));
       return 0;
     }
     total_written += nbytes_written;
@@ -526,7 +648,7 @@ static _Bool socket_send_request(int fd, char *buffer, ptrdiff_t len, ErrList *e
 static int unix_socket_connect(S8 socket_path, ErrList *errors) {
   int sock = socket(AF_UNIX, SOCK_STREAM, 0);
   if (sock < 0) {
-    emit_errno(errors, s8("socket"));
+    errors_emit_errno(errors, s8("socket"));
     return sock;
   }
 
@@ -534,10 +656,11 @@ static int unix_socket_connect(S8 socket_path, ErrList *errors) {
   sock_addr.sun_family = AF_UNIX;
   if (socket_path.len + 1 >= countof(sock_addr.sun_path)) {
     close(sock);
-    emit_err(errors, Error_Severity_Error,
-             s8concat(&errors->scratch, s8("Socket path too long: "),
-                      s8i64(&errors->scratch, socket_path.len),
-                      s8(" >= "), s8i64(&errors->scratch, sizeof(sock_addr.sun_path))));
+    Arena scratch = errors->scratch;
+    errors_emit(errors,
+             s8concat(&scratch, s8("Socket path too long: "),
+                      s8i64(&scratch, socket_path.len),
+                      s8(" >= "), s8i64(&scratch, sizeof(sock_addr.sun_path))));
     return -1;
   }
   memcpy(sock_addr.sun_path, socket_path.data, socket_path.len);
@@ -545,7 +668,7 @@ static int unix_socket_connect(S8 socket_path, ErrList *errors) {
 
   if (connect(sock, (struct sockaddr *)&sock_addr, sizeof(sock_addr)) < 0) {
     close(sock);
-    emit_errno(errors, s8("connect"));
+    errors_emit_errno(errors, s8("connect"));
     return -1;
   }
 
@@ -555,12 +678,12 @@ static int unix_socket_connect(S8 socket_path, ErrList *errors) {
 static int create_wayland_shm_pool(int sock, int shm, int shm_pool, int shm_pool_sz, ErrList *errors) {
   int shm_pool_fd = syscall(SYS_memfd_create, "wayland-buffer", 0);
   if (shm_pool_fd < 0) {
-    emit_errno(errors, s8("shm_open"));
+    errors_emit_errno(errors, s8("shm_open"));
     return -1;
   }
 
   if (ftruncate(shm_pool_fd, shm_pool_sz) < 0) {
-    emit_errno(errors, s8("ftruncate"));
+    errors_emit_errno(errors, s8("ftruncate"));
     close(shm_pool_fd);
     return -1;
   }
@@ -590,13 +713,13 @@ static int create_wayland_shm_pool(int sock, int shm, int shm_pool, int shm_pool
 
   ssize_t nbytes_written = sendmsg(sock, &msg, 0);
   if (nbytes_written < 0) {
-    emit_errno(errors, s8("sendmsg"));
+    errors_emit_errno(errors, s8("sendmsg"));
     close(shm_pool_fd);
     return -1;
   }
 
   if (nbytes_written != len) {
-    emit_errno(errors, s8("sendmsg incomplete"));
+    errors_emit_errno(errors, s8("sendmsg incomplete"));
     close(shm_pool_fd);
     return -1;
   }
@@ -625,7 +748,7 @@ static _Bool read_wl_response(Arena *arena, int sock, Wl_Response_Result *out_re
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       return 1;
     }
-    emit_errno(errors, s8("read"));
+    errors_emit_errno(errors, s8("read"));
     return 0;
   }
 
@@ -636,7 +759,7 @@ static _Bool read_wl_response(Arena *arena, int sock, Wl_Response_Result *out_re
 
   if (nbytes_read != sizeof(header)) {
     Arena scratch = errors->scratch;
-    emit_err(errors, Error_Severity_Error,
+    errors_emit(errors,
              s8concat(&scratch, s8("Malformed wayland response: Expected "),
                       s8i64(&scratch, sizeof(header)), s8(" bytes, but got "),
                       s8i64(&scratch, nbytes_read)));
@@ -644,17 +767,17 @@ static _Bool read_wl_response(Arena *arena, int sock, Wl_Response_Result *out_re
   }
 
   ssize_t remaining = header.size - sizeof(header);
-  char *body = new(arena, char, remaining);
+  char *body = (char *)arena_alloc_end_ext(arena, sizeof(char), _Alignof(uint32_t), remaining);
   ssize_t body_len = read(sock, body, remaining);
 
   if (body_len < 0) {
-    emit_errno(errors, s8("read"));
+    errors_emit_errno(errors, s8("read"));
     return 0;
   }
 
   if (body_len != remaining) {
     Arena scratch = errors->scratch;
-    emit_err(errors, Error_Severity_Error,
+    errors_emit(errors,
              s8concat(&scratch, s8("Malformed wayland response: Expected "),
                       s8i64(&scratch, remaining),
                       s8(" bytes after header, but got "),
@@ -693,6 +816,7 @@ struct Wayland {
 
   uint32_t surface;
   uint32_t xdg_surface;
+  _Bool xdg_surface_acked_once;
   uint32_t xdg_toplevel;
 
   uint32_t frame_callback_id;
@@ -707,40 +831,44 @@ struct Wayland {
 };
 
 static Wayland_Framebuffer wayland_create_framebuffer(Wayland *wayland, int sock, int width, int height, ErrList *errors) {
-    static char buffer[MAX_WAYLAND_BUFFER_SIZE] = {0};
-    static const int buffer_capacity = MAX_WAYLAND_BUFFER_SIZE;
+  static char buffer[MAX_WAYLAND_BUFFER_SIZE] = {0};
+  static const int buffer_capacity = MAX_WAYLAND_BUFFER_SIZE;
 
-    Wayland_Framebuffer result = {0};
+  Wayland_Framebuffer result = {0};
 
-    int shm_pool_id = ++wayland->prev_id;
-    int shm_pool_sz = height * width * 4;
-    int shm_pool_fd = create_wayland_shm_pool(sock, wayland->shm, shm_pool_id, shm_pool_sz, errors);
-    if (shm_pool_fd < 0) {
-        return result;
-    }
+  if (!width)  width  = 1;
+  if (!height) height = 1;
 
-    int buffer_id = ++wayland->prev_id;
-    enum { WL_SHM_POOL_ENUM_FORMAT_ARGB8888 = 0 };
-    int message_sz = wl_shm_pool_create_buffer(buffer, buffer_capacity, shm_pool_id, buffer_id, 0, width, height, width * 4, WL_SHM_POOL_ENUM_FORMAT_ARGB8888);
-    if (!socket_send_request(sock, buffer, message_sz, errors)) {
-        return result;
-    }
+  // REVIEW: the pool is supposed to be shared among multiple wl_buffer objects
+  int shm_pool_id = ++wayland->prev_id;
+  int shm_pool_sz = height * width * sizeof(*result.pixels);
+  int shm_pool_fd = create_wayland_shm_pool(sock, wayland->shm, shm_pool_id, shm_pool_sz, errors);
+  if (shm_pool_fd < 0) {
+      return result;
+  }
 
-    uint32_t *pixels = (uint32_t *)mmap(0, shm_pool_sz, PROT_READ | PROT_WRITE, MAP_SHARED, shm_pool_fd, 0);
-    if (pixels == MAP_FAILED) {
-        emit_errno(errors, s8("mmap"));
-        return result;
-    }
+  int buffer_id = ++wayland->prev_id;
+  enum { WL_SHM_POOL_ENUM_FORMAT_ARGB8888 = 0 };
+  int message_sz = wl_shm_pool_create_buffer(buffer, buffer_capacity, shm_pool_id, buffer_id, 0, width, height, width * 4, WL_SHM_POOL_ENUM_FORMAT_ARGB8888);
+  if (!socket_send_request(sock, buffer, message_sz, errors)) {
+      return result;
+  }
 
-    result.id = buffer_id;
-    result.shm_pool = shm_pool_id;
-    result.shm_pool_fd = shm_pool_fd;
-    result.shm_pool_sz = shm_pool_sz;
-    result.width = width;
-    result.height = height;
-    result.pixels = pixels;
+  uint32_t *pixels = (uint32_t *)mmap(0, shm_pool_sz, PROT_READ | PROT_WRITE, MAP_SHARED, shm_pool_fd, 0);
+  if (pixels == MAP_FAILED) {
+      errors_emit_errno(errors, s8("mmap"));
+      return result;
+  }
 
-    return result;
+  result.id = buffer_id;
+  result.shm_pool = shm_pool_id;
+  result.shm_pool_fd = shm_pool_fd;
+  result.shm_pool_sz = shm_pool_sz;
+  result.width = width;
+  result.height = height;
+  result.pixels = pixels;
+
+  return result;
 }
 
 static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *out) {
@@ -776,7 +904,7 @@ static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *ou
     if (response.header.object_id == wayland.registry && response.header.opcode == OPCODE_WL_REGISTRY_EVENT_GLOBAL) {
       char *at = response.body;
       uint32_t name = read_u32(&at);
-      S8 interface = read_s8_and_align(&at);
+      S8 interface = wl_wire_read_s8_and_align(&at);
       uint32_t version = read_u32(&at);
 
       S8 wl_shm_lit = s8("wl_shm");
@@ -784,7 +912,7 @@ static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *ou
       S8 xdg_wm_base_lit = s8("xdg_wm_base");
       if (s8equal(interface, wl_compositor_lit)) {
         if (version < REQUIRED_COMPOSITOR_VERSION) {
-          emit_err(errors, Error_Severity_Error,
+          errors_emit(errors,
                    s8concat(&scratch, s8("Expected wayland compositor version >="),
                             s8i64(&scratch, REQUIRED_COMPOSITOR_VERSION),
                             s8(" but got version "), s8i64(&scratch, version)));
@@ -796,7 +924,7 @@ static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *ou
       }
       else if (s8equal(interface, wl_shm_lit)) {
         if (version < REQUIRED_WL_SHM_VERSION) {
-          emit_err(errors, Error_Severity_Error,
+          errors_emit(errors,
                    s8concat(&scratch, s8("Expected wayland shm version >="),
                             s8i64(&scratch, REQUIRED_COMPOSITOR_VERSION),
                             s8(" but got version "), s8i64(&scratch, version)));
@@ -808,7 +936,7 @@ static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *ou
       }
       else if (s8equal(interface, xdg_wm_base_lit)) {
         if (version < REQUIRED_XDG_WM_BASE_VERSION) {
-          emit_err(errors, Error_Severity_Error,
+          errors_emit(errors,
                    s8concat(&scratch, s8("Expected wayland xdg_wm_base version >="),
                             s8i64(&scratch, REQUIRED_COMPOSITOR_VERSION),
                             s8(" but got version "), s8i64(&scratch, version)));
@@ -836,20 +964,17 @@ static int wayland_connect(Arena scratch, int sock, ErrList *errors, Wayland *ou
   message_sz = wl_xdg_surface_get_toplevel(buffer, buffer_capacity, wayland.xdg_surface, wayland.xdg_toplevel);
   if (!socket_send_request(sock, buffer, message_sz, errors)) return -1;
 
-  for (ptrdiff_t i = 0; i < countof(wayland.buffers); i++) {
-    enum { DEFAULT_WIDTH = 640, DEFAULT_HEIGHT = 480 };
-    wayland.buffers[i] = wayland_create_framebuffer(&wayland, sock, DEFAULT_WIDTH, DEFAULT_HEIGHT, errors);
-    if (wayland.buffers[i].pixels == 0) return -1;
-  }
+  message_sz = wl_surface_commit(buffer, buffer_capacity, wayland.surface);
+  if (!socket_send_request(sock, buffer, message_sz, errors)) return -1;
 
   { // Make socket non-blocking
     int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0) {
-      emit_errno(errors, s8("fcntl F_GETFL"));
+      errors_emit_errno(errors, s8("fcntl F_GETFL"));
       return -1;
     }
     if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
-      emit_errno(errors, s8("fcntl F_SETFL O_NONBLOCK"));
+      errors_emit_errno(errors, s8("fcntl F_SETFL O_NONBLOCK"));
       return -1;
     }
   }
@@ -872,7 +997,7 @@ static S8 getenv_wrapped(const char *name) {
 
 static Arena os_make_arena(ptrdiff_t nbyte) {
   uint8_t *heap = malloc(nbyte);
-  return (Arena){heap, heap + nbyte};
+  return arena_make(heap, nbyte);
 }
 
 int main() {
@@ -905,7 +1030,7 @@ int main() {
 
     struct pollfd pfd = {.fd = sock, .events = POLLIN};
     int ret = poll(&pfd, 1, 16); // 16ms timeout
-    if (ret < 0) { emit_errno(errors, s8("poll")); goto err; }
+    if (ret < 0) { errors_emit_errno(errors, s8("poll")); goto err; }
     if (!(pfd.revents & POLLIN)) { continue; /* No events */ }
 
     // Process pending Wayland events
@@ -925,6 +1050,7 @@ int main() {
 
           message_sz = wl_xdg_surface_ack_configure(buffer, buffer_capacity, wayland.xdg_surface, serial);
           if (!socket_send_request(sock, buffer, message_sz, errors)) goto err;
+          wayland.xdg_surface_acked_once = 1;
         } break;
         default: {
           fprintf(stderr, "[INFO] Unhandled opcode %d", response.header.opcode);
@@ -940,7 +1066,7 @@ int main() {
           uint32_t height = read_u32(&at);
           uint32_t states_len = read_u32(&at);
           tassert((at - response.body) + states_len < response.header.size);
-          uint8_t *states = new(&scratch, uint8_t, states_len);
+          uint8_t *states = arena_alloc(&scratch, uint8_t, states_len);
           for (uint32_t i = 0; i < states_len; i++) {
             states[i] = *at++;
           }
@@ -959,6 +1085,9 @@ int main() {
           should_resize_framebuffer |= (draw_buffer->width  != width);
           should_resize_framebuffer |= (draw_buffer->height != height);
           if (should_resize_framebuffer) {
+            enum { DEFAULT_WIDTH = 640, DEFAULT_HEIGHT = 480 };
+            if (width  == 0) width  = DEFAULT_WIDTH;
+            if (height == 0) height = DEFAULT_HEIGHT;
             for (ptrdiff_t i = 0; i < countof(wayland.buffers); i++) {
               wayland.buffers_cleanups[wayland.buffers_cleanups_count++] = wayland.buffers[i];
               wayland.buffers[i] = wayland_create_framebuffer(&wayland, sock, width, height, errors);
@@ -987,7 +1116,7 @@ int main() {
         case 0: {
           uint32_t object_id = read_u32(&at);
           uint32_t error_code = read_u32(&at);
-          S8 error_message = read_s8_and_align(&at);
+          S8 error_message = wl_wire_read_s8_and_align(&at);
           fprintf(stderr, "[INFO] wl_display:error(%d, %d, %.*s)\n", object_id, error_code, s8pri(error_message));
         } break;
         case 1: {
@@ -1042,7 +1171,16 @@ int main() {
         case 0: { // wl_callback:done
           char *at = response.body;
           uint32_t current_time_ms = read_u32(&at);
-          (void)current_time_ms; // 𝚫7ms on my machine
+          (void)current_time_ms;
+
+          #if 0
+          static uint32_t prev_times_ms = 0;
+          if (prev_times_ms) {
+            printf("%d\n", current_time_ms - prev_times_ms); // ~7ms on my machine
+          }
+          prev_times_ms = current_time_ms;
+          #endif
+
           wayland.frame_callback_pending = 0;
         } break;
         }
@@ -1055,18 +1193,16 @@ int main() {
 
     if (draw_buffer->in_use_by_compositor) continue;
     if (wayland.frame_callback_pending)    continue;
+    if (!wayland.xdg_surface_acked_once)   continue;
 
     // Clear pixels
-    for (uint32_t y = 0; y < draw_buffer->height; y++) {
-      for (uint32_t x = 0; x < draw_buffer->width; x++) {
-        draw_buffer->pixels[y * draw_buffer->width + x] = 0xFF000000;
-      }
-    }
+    memset(draw_buffer->pixels, 0, draw_buffer->width * draw_buffer->height * sizeof(*draw_buffer->pixels));
 
     // Draw
-    static float zoom = 90;
-    zoom *= 1.01;
-    draw_mandelbrot(draw_buffer->pixels, draw_buffer->width, draw_buffer->height, zoom, -0.72, -0.20);
+    static int frame = 0;
+    frame += 1;
+    draw_checkerboard(draw_buffer->pixels, draw_buffer->width, draw_buffer->height, 0xFF000000, 0xFF111111, 32);
+    draw_lissajous_curve(scratch, draw_buffer->pixels, draw_buffer->width, draw_buffer->height, 0xFF77FF33, frame * 0.02f);
 
     // Request next frame
     wayland.frame_callback_id = ++wayland.prev_id;
@@ -1088,8 +1224,8 @@ int main() {
   close(sock);
 
  err:
-  for_errors(errors, error) {
-    fprintf(stderr, "[ERROR] %.*s", s8pri(error->message));
+  errors_for(errors, error) {
+    fprintf(stderr, "[ERROR] %.*s\n", s8pri(error->message));
   }
-  return (int)errors_get_max_severity_and_reset(errors);
+  return errors_get_health_and_reset(errors);
 }
